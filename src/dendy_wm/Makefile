@@ -1,17 +1,30 @@
+# Compiler and flags
 CC = gcc
-CFLAGS = -std=c99 -Wall -Wextra -Wno-unused-parameter -I. -I/usr/include/libdrm -I/usr/include/pixman-1
+# FIX: Add -I. to include the current directory in the header search path
+CFLAGS = -std=c99 -Wall -Wextra -Wno-unused-parameter -g -I. $(shell pkg-config --cflags wlroots)
+
+# Use pkg-config to get linker libraries for wlroots and its dependencies
+LDLIBS = $(shell pkg-config --libs wlroots)
+
+# Source and object files
 OBJECTS = dendy_wm.o
+TARGET = dendy_wm
 
-all: dendy_wm
+.PHONY: all clean
 
-dendy_wm: $(OBJECTS)
-	$(CC) $(OBJECTS) -o dendy_wm -lwayland-server -lwlroots -lxkbcommon
+all: $(TARGET)
 
+# Rule to link the final executable
+$(TARGET): $(OBJECTS)
+	$(CC) $(OBJECTS) -o $@ $(LDLIBS)
+
+# Rule to compile source files
 dendy_wm.o: dendy_wm.c xdg-shell-protocol.h
 	$(CC) $(CFLAGS) -c dendy_wm.c -o dendy_wm.o
 
-xdg-shell-protocol.h:
-	wayland-scanner server-header /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml xdg-shell-protocol.h
+# Rule to generate the Wayland protocol header
+xdg-shell-protocol.h: /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml
+	wayland-scanner server-header $< $@
 
 clean:
-	rm -f dendy_wm $(OBJECTS) xdg-shell-protocol.h
+	rm -f $(TARGET) $(OBJECTS) xdg-shell-protocol.h
