@@ -8,7 +8,8 @@ cd src
     # Dendy Window Manager
     echo "🏢: Window Manager"
     cd dendy_wm
-        gcc dendy_wm.c -o dendy_wm -lX11
+        g++ dendy_wm.cpp -o dendy_wm -lX11
+        chmod +x dendy_wm
         cp dendy_wm ../../dendy/etc/dendy/dendy_wm
         echo ""
     cd ..
