@@ -1,0 +1,6 @@
+Package: dendy
+Version: 1.0.0
+Architecture: amd64
+Maintainer: Ethan Hill <ehill.hill199@outlook.com>
+Depends: libwayland-server0, libwlroots12, libxkbcommon0, libpixman-1-0, libdrm2
+Description: Dendy System Software
