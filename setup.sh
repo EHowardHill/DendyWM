@@ -1,1 +1,1 @@
-sudo apt install build-essential libx11-dev
+sudo apt install build-essential libx11-dev libraylib-dev
