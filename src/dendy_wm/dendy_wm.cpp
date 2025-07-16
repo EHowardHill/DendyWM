@@ -1,39 +1,36 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/keysym.h>
 #include <iostream>
 #include <stdexcept>
-#include <vector>      // Required for tracking multiple windows
-#include <algorithm>   // Required for std::find
+#include <vector>
+#include <algorithm>
 #include <cstdlib>
-#include <unistd.h>    // for fork, execvp, setsid
-#include <csignal>     // for signal
+#include <unistd.h>
+#include <csignal>
+#include <chrono>
 
-// A global flag to detect if another window manager is already running.
-// The X11 error handler will set this to true if it catches a specific error.
 static bool another_wm_running = false;
 
-// Custom X11 error handler.
-// Xlib is not thread-safe and uses this global function approach.
-// It will be called if a request to the X server fails. We are specifically
-// looking for a BadAccess error when we try to become the window manager,
-// which indicates another one is already active.
-static int x_error_handler(Display* dpy, XErrorEvent* ee) {
-    if (ee->error_code == BadAccess) {
+static int x_error_handler(Display *dpy, XErrorEvent *ee)
+{
+    if (ee->error_code == BadAccess)
+    {
         another_wm_running = true;
     }
-    // We don't print other errors to keep the output clean, but in a real
-    // application, you would want to log them.
-    return 0; // The return value is ignored.
+    return 0;
 }
 
-class WindowManager {
+class WindowManager
+{
 public:
-    // Constructor: Initializes the connection to the X server.
-    WindowManager(const char* app_path) : app_path_(app_path) {
-        // 1. Open a connection to the X server.
-        // `nullptr` means use the DISPLAY environment variable.
+    WindowManager(const char *app_path) : app_path_(app_path),
+                                          super_key_pressed_(false),
+                                          initial_window_(None)
+    {
         display_ = XOpenDisplay(nullptr);
-        if (!display_) {
+        if (!display_)
+        {
             throw std::runtime_error("Failed to open X display.");
         }
 
@@ -42,61 +39,78 @@ public:
         root_ = RootWindow(display_, screen_);
         screen_width_ = DisplayWidth(display_, screen_);
         screen_height_ = DisplayHeight(display_, screen_);
-        
-        // The client_windows_ vector is automatically initialized to be empty.
 
+        // The client_windows_ vector is automatically initialized to be empty.
         std::cout << "Screen dimensions: " << screen_width_ << "x" << screen_height_ << std::endl;
     }
 
     // Destructor: Cleans up the connection.
-    ~WindowManager() {
-        if (display_) {
+    ~WindowManager()
+    {
+        if (display_)
+        {
             XCloseDisplay(display_);
         }
     }
 
     // The main entry point to run the window manager.
-    void run() {
-        // 1. Set our custom error handler to detect if another WM is running.
+    void run()
+    {
         XSetErrorHandler(x_error_handler);
 
-        // 2. Select events we want to listen for on the root window.
-        // SubstructureRedirectMask is the key: it tells the X server to send
-        // us events for mapping/configuring top-level windows instead of
-        // doing it automatically. This is how a window manager takes control.
-        XSelectInput(display_, root_, SubstructureRedirectMask | SubstructureNotifyMask);
-
-        // 3. Synchronize with the X server. This flushes the request buffer
-        // and ensures our error handler is called if the XSelectInput request
-        // failed (e.g., because another WM is running).
+        // Need to select events before becoming WM to avoid race conditions
+        XSelectInput(display_, root_, SubstructureRedirectMask | SubstructureNotifyMask | KeyPressMask | KeyReleaseMask);
         XSync(display_, False);
 
-        if (another_wm_running) {
+        if (another_wm_running)
+        {
             throw std::runtime_error("Another window manager is already running.");
         }
         std::cout << "Successfully became the window manager." << std::endl;
 
-        // 4. Launch the initial application.
+        // Grab the Super key
+        grab_super_key();
+
         launch_initial_app();
 
-        // 5. Enter the main event loop.
+        // Allow some time for the initial app to create its window
+        usleep(100000); // 100ms
+
         event_loop();
     }
 
 private:
+    // Grabs the Super key for global hotkey functionality
+    void grab_super_key()
+    {
+        KeyCode super_keycode = XKeysymToKeycode(display_, XK_Super_L);
+        if (super_keycode == 0)
+        {
+            std::cerr << "Warning: Could not find Super_L key" << std::endl;
+            return;
+        }
+
+        // Grab the key with any modifier combination
+        XGrabKey(display_, super_keycode, AnyModifier, root_, True, GrabModeAsync, GrabModeAsync);
+        std::cout << "Grabbed Super_L key (keycode: " << (int)super_keycode << ")" << std::endl;
+    }
+
     // Forks and executes the initial application.
-    void launch_initial_app() {
+    void launch_initial_app()
+    {
         pid_t pid = fork();
-        if (pid < 0) {
+        if (pid < 0)
+        {
             throw std::runtime_error("Failed to fork.");
         }
 
-        if (pid == 0) { // Child process
+        if (pid == 0)
+        { // Child process
             // Detach from the controlling terminal
             setsid();
 
             // Prepare arguments for execvp. It needs a null-terminated array.
-            char* const args[] = {const_cast<char*>(app_path_), nullptr};
+            char *const args[] = {const_cast<char *>(app_path_), nullptr};
             execvp(app_path_, args);
 
             // If execvp returns, an error occurred.
@@ -107,63 +121,197 @@ private:
     }
 
     // The main loop that listens for and handles X events.
-    void event_loop() {
+    void event_loop()
+    {
         XEvent ev;
-        for (;;) {
-            // Get the next event from the queue. This call blocks.
+        for (;;)
+        {
+            // Check if we need to process the Super key timeout
+            if (super_key_pressed_)
+            {
+                // Use select with timeout to check for events
+                fd_set fds;
+                FD_ZERO(&fds);
+                int x11_fd = ConnectionNumber(display_);
+                FD_SET(x11_fd, &fds);
+
+                struct timeval tv;
+                tv.tv_sec = 0;
+                tv.tv_usec = 50000; // 50ms timeout
+
+                if (select(x11_fd + 1, &fds, nullptr, nullptr, &tv) == 0)
+                {
+                    // Timeout occurred, check if 3 seconds have passed
+                    auto now = std::chrono::steady_clock::now();
+                    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - super_press_start_);
+
+                    if (duration.count() >= 2000)
+                    {
+                        std::cout << "Super key held for 2 seconds, closing all windows except initial" << std::endl;
+                        close_all_except_initial();
+                        super_key_pressed_ = false;
+                    }
+                    continue;
+                }
+            }
+
+            // Get the next event from the queue. This call blocks if no timeout is set.
             XNextEvent(display_, &ev);
 
-            switch (ev.type) {
-                // An application wants to be displayed (mapped) on the screen.
-                case MapRequest:
-                    handle_map_request(ev.xmaprequest);
-                    break;
+            switch (ev.type)
+            {
+            // An application wants to be displayed (mapped) on the screen.
+            case MapRequest:
+                handle_map_request(ev.xmaprequest);
+                break;
 
-                // An application wants to change its size or position.
-                case ConfigureRequest:
-                    handle_configure_request(ev.xconfigurerequest);
-                    break;
+            // An application wants to change its size or position.
+            case ConfigureRequest:
+                handle_configure_request(ev.xconfigurerequest);
+                break;
 
-                // A window was closed/destroyed.
-                case DestroyNotify:
-                    handle_window_closed(ev.xdestroywindow.window);
-                    break;
-                case UnmapNotify:
-                    // We handle UnmapNotify as well because some applications unmap their
-                    // window before destroying it. This handler is idempotent.
-                    handle_window_closed(ev.xunmap.window);
-                    break;
+            // A window was closed/destroyed.
+            case DestroyNotify:
+                handle_window_destroyed(ev.xdestroywindow.window);
+                break;
+            case UnmapNotify:
+                // Only handle unmap if we didn't cause it
+                if (ev.xunmap.send_event == False)
+                {
+                    handle_window_unmapped(ev.xunmap.window);
+                }
+                break;
+
+            // Key events
+            case KeyPress:
+                handle_key_press(ev.xkey);
+                break;
+            case KeyRelease:
+                handle_key_release(ev.xkey);
+                break;
             }
         }
     }
 
+    // Handles key press events
+    void handle_key_press(const XKeyEvent &e)
+    {
+        KeySym keysym = XLookupKeysym(const_cast<XKeyEvent *>(&e), 0);
+
+        if (keysym == XK_Super_L)
+        {
+            if (!super_key_pressed_)
+            {
+                super_key_pressed_ = true;
+                super_press_start_ = std::chrono::steady_clock::now();
+                std::cout << "Super_L key pressed, starting timer" << std::endl;
+            }
+        }
+    }
+
+    // Handles key release events
+    void handle_key_release(const XKeyEvent &e)
+    {
+        KeySym keysym = XLookupKeysym(const_cast<XKeyEvent *>(&e), 0);
+
+        if (keysym == XK_Super_L)
+        {
+            if (super_key_pressed_)
+            {
+                super_key_pressed_ = false;
+                auto now = std::chrono::steady_clock::now();
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - super_press_start_);
+                std::cout << "Super_L key released after " << duration.count() << "ms" << std::endl;
+            }
+        }
+    }
+
+    // Closes all windows except the initial one
+    void close_all_except_initial()
+    {
+        if (initial_window_ == None || client_windows_.empty())
+        {
+            std::cout << "No windows to close or initial window not set" << std::endl;
+            return;
+        }
+
+        // Create a copy of the windows list to iterate safely
+        std::vector<Window> windows_to_close;
+        for (Window w : client_windows_)
+        {
+            if (w != initial_window_)
+            {
+                windows_to_close.push_back(w);
+            }
+        }
+
+        std::cout << "Closing " << windows_to_close.size() << " windows (keeping window " << initial_window_ << ")" << std::endl;
+
+        // Close each window
+        for (Window w : windows_to_close)
+        {
+            std::cout << "Closing window " << w << std::endl;
+
+            // Try to close the window gracefully first
+            XEvent close_event;
+            close_event.type = ClientMessage;
+            close_event.xclient.window = w;
+            close_event.xclient.message_type = XInternAtom(display_, "WM_PROTOCOLS", False);
+            close_event.xclient.format = 32;
+            close_event.xclient.data.l[0] = XInternAtom(display_, "WM_DELETE_WINDOW", False);
+            close_event.xclient.data.l[1] = CurrentTime;
+
+            XSendEvent(display_, w, False, NoEventMask, &close_event);
+
+            // Also forcefully destroy the window
+            XDestroyWindow(display_, w);
+        }
+
+        XFlush(display_);
+
+        // Ensure the initial window is on top and focused
+        if (initial_window_ != None)
+        {
+            XRaiseWindow(display_, initial_window_);
+            XSetInputFocus(display_, initial_window_, RevertToParent, CurrentTime);
+            std::cout << "Raised and focused initial window " << initial_window_ << std::endl;
+        }
+    }
+
     // Handles a MapRequest event. This is where new windows are managed.
-    void handle_map_request(const XMapRequestEvent& e) {
+    void handle_map_request(const XMapRequestEvent &e)
+    {
         std::cout << "Handling MapRequest for window " << e.window << std::endl;
 
-        // --- CHANGED ---
-        // Instead of ignoring new windows, we manage all of them.
+        // Set the initial window if not set yet (first window from launched app)
+        if (initial_window_ == None && client_windows_.empty())
+        {
+            initial_window_ = e.window;
+            std::cout << "Set initial window to " << initial_window_ << std::endl;
+        }
 
-        // 1. Force the new window to be fullscreen.
+        // Configure the window to fullscreen
         XMoveResizeWindow(display_, e.window, 0, 0, screen_width_, screen_height_);
 
-        // 2. Make the window visible.
+        // Map the window first
         XMapWindow(display_, e.window);
-        
-        // 3. Raise the window to the top of the stacking order.
+
+        // Add to our window list
+        client_windows_.push_back(e.window);
+
+        // Ensure the new window is on top and has focus
         XRaiseWindow(display_, e.window);
-        
-        // 4. Give the window input focus.
         XSetInputFocus(display_, e.window, RevertToParent, CurrentTime);
 
-        // 5. Add the window to our list of managed clients.
-        client_windows_.push_back(e.window);
+        // Force a sync to ensure the window is properly displayed
+        XSync(display_, False);
+
+        std::cout << "Mapped window " << e.window << " (total windows: " << client_windows_.size() << ")" << std::endl;
     }
 
     // Handles a ConfigureRequest event.
-    void handle_configure_request(const XConfigureRequestEvent& e) {
-        // The application is trying to resize or move itself. We deny this
-        // by re-asserting our fullscreen configuration to maintain the kiosk mode.
+    void handle_configure_request(const XConfigureRequestEvent &e)
+    {
         XWindowChanges changes;
         changes.x = 0;
         changes.y = 0;
@@ -173,63 +321,85 @@ private:
         changes.sibling = e.above;
         changes.stack_mode = e.detail;
 
-        // Apply our configuration instead of the one the application requested.
-        XConfigureWindow(display_, e.window, e.value_mask, &changes);
-        std::cout << "Handled ConfigureRequest, forcing fullscreen." << std::endl;
+        // Only configure size/position, don't change stacking unless explicitly requested
+        unsigned long value_mask = e.value_mask & ~(CWSibling | CWStackMode);
+        if (e.value_mask & (CWSibling | CWStackMode))
+        {
+            // If stacking is requested, honor it
+            value_mask = e.value_mask;
+        }
+
+        XConfigureWindow(display_, e.window, value_mask, &changes);
+        std::cout << "Handled ConfigureRequest for window " << e.window << std::endl;
     }
-    
-    // --- NEW ---
-    // Handles a window being closed (unmapped or destroyed).
-    void handle_window_closed(Window w) {
-        // Find the closed window in our list.
+
+    void handle_window_destroyed(Window w)
+    {
         auto it = std::find(client_windows_.begin(), client_windows_.end(), w);
 
-        if (it != client_windows_.end()) {
-            std::cout << "Client window " << w << " was closed." << std::endl;
-            
+        if (it != client_windows_.end())
+        {
+            std::cout << "Client window " << w << " was destroyed." << std::endl;
+
             // Remove the window from our list.
             client_windows_.erase(it);
 
             // Check if any windows are left.
-            if (client_windows_.empty()) {
+            if (client_windows_.empty())
+            {
                 std::cout << "Last client window closed. Exiting." << std::endl;
                 XCloseDisplay(display_);
                 display_ = nullptr; // Prevent double-close in destructor
                 exit(0);
-            } else {
-                // If other windows remain, give focus to the new top-most one
-                // (which is now the last element in our vector).
+            }
+            else
+            {
+                // Focus the topmost remaining window
                 Window top_window = client_windows_.back();
                 XSetInputFocus(display_, top_window, RevertToParent, CurrentTime);
-                 std::cout << "Gave focus to window " << top_window << std::endl;
+                XRaiseWindow(display_, top_window);
+                std::cout << "Gave focus to window " << top_window << std::endl;
             }
         }
     }
 
-    Display* display_;
+    void handle_window_unmapped(Window w)
+    {
+        // For now, treat unmapping the same as destroying
+        // Some applications might unmap windows temporarily
+        std::cout << "Window " << w << " was unmapped" << std::endl;
+        handle_window_destroyed(w);
+    }
+
+    Display *display_;
     int screen_;
     Window root_;
     int screen_width_;
     int screen_height_;
-    const char* app_path_;
-    // --- CHANGED ---
-    // We now use a vector to keep track of all managed windows in stacking order.
-    // The last element is the top-most window.
+    const char *app_path_;
     std::vector<Window> client_windows_;
+    Window initial_window_;
+    bool super_key_pressed_;
+    std::chrono::steady_clock::time_point super_press_start_;
 };
 
 // Main function
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
+int main(int argc, char *argv[])
+{
+    if (argc < 2)
+    {
         std::cerr << "Usage: " << argv[0] << " <path_to_application>" << std::endl;
         std::cerr << "Example: " << argv[0] << " /usr/bin/xterm" << std::endl;
         return 1;
     }
 
-    try {
+    try
+    {
         WindowManager wm(argv[1]);
         wm.run();
-    } catch (const std::runtime_error& e) {
+    }
+    catch (const std::runtime_error &e)
+    {
         std::cerr << "Fatal Error: " << e.what() << std::endl;
         return 1;
     }
