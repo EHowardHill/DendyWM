@@ -1,16 +1,18 @@
 # Makefile for Raylib App Launcher
 
-CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2
-LDFLAGS = -lraylib -lm -lpthread -ldl -lrt -lX11
+CXX       := g++
+CXXFLAGS  := -std=c++17 -Wall -Wextra -O2 \
+              -I./include
+LDFLAGS   := -L./lib
+LDFLAGS  += -lraylib -lm -lpthread -ldl -lrt -lX11
 
-# Detect if running on Debian/Ubuntu for package management
-DISTRO := $(shell lsb_release -si 2>/dev/null || echo "Unknown")
+# Optionally embed the rpath so your app finds libraylib.so at runtime:
+# LDFLAGS += -Wl,-rpath=\$$ORIGIN/raylib/lib
 
-TARGET = app_launcher
-SOURCE = app_launcher.cpp
+TARGET    := dendy_launcher
+SOURCE    := dendy_launcher.cpp
 
-.PHONY: all clean install-deps run
+.PHONY: all clean run
 
 all: $(TARGET)
 
@@ -20,23 +22,14 @@ $(TARGET): $(SOURCE)
 clean:
 	rm -f $(TARGET)
 
-install-deps:
-	@echo "Installing dependencies for $(DISTRO)..."
-	@if [ "$(DISTRO)" = "Debian" ] || [ "$(DISTRO)" = "Ubuntu" ]; then \
-		sudo apt-get update && \
-		sudo apt-get install -y build-essential libraylib-dev libx11-dev; \
-	else \
-		echo "Please install raylib and X11 development libraries manually"; \
-	fi
-
 run: $(TARGET)
 	./$(TARGET)
 
-# Alternative build with debugging symbols
+# debug build
 debug: CXXFLAGS += -g -DDEBUG
 debug: $(TARGET)
 
-# Build with Address Sanitizer for memory debugging
+# AddressSanitizer build
 asan: CXXFLAGS += -fsanitize=address -g
-asan: LDFLAGS += -fsanitize=address
+asan: LDFLAGS  += -fsanitize=address
 asan: $(TARGET)

@@ -1,7 +1,7 @@
 // app_launcher.cpp - Apple TV style application launcher for Linux
 // Compile: g++ app_launcher.cpp -o app_launcher -lraylib -lm -lpthread -ldl -lrt -lX11 -std=c++17
 
-#include <raylib.h>
+#include "include/raylib.h"
 #include <iostream>
 #include <vector>
 #include <string>
@@ -29,6 +29,22 @@ constexpr float SMOOTH_SCROLL_FACTOR = 0.15f;
 constexpr float GAMEPAD_DEADZONE = 0.25f;
 constexpr float SELECTION_SCALE = 1.1f;
 constexpr float ANIMATION_SPEED = 0.2f;
+
+bool hasBeginning (std::string const &fullString, std::string const &beginning) {
+    if (fullString.length() >= beginning.length()) {
+        return (0 == fullString.compare(0, beginning.length(), beginning));
+    } else {
+        return false;
+    }
+}
+
+bool hasEnding (std::string const &fullString, std::string const &ending) {
+    if (fullString.length() >= ending.length()) {
+        return (0 == fullString.compare (fullString.length() - ending.length(), ending.length(), ending));
+    } else {
+        return false;
+    }
+}
 
 class AppEntry {
 public:
@@ -108,19 +124,19 @@ public:
             
             if (line == "[Desktop Entry]") {
                 inDesktopEntry = true;
-            } else if (line.starts_with("[")) {
+            } else if (hasBeginning(line, "[")) {
                 inDesktopEntry = false;
             } else if (inDesktopEntry && !line.empty()) {
-                if (line.starts_with("Name=") && app->name.empty()) {
+                if (hasBeginning(line, "Name=") && app->name.empty()) {
                     app->name = line.substr(5);
-                } else if (line.starts_with("Exec=")) {
+                } else if (hasBeginning(line, "Exec=")) {
                     app->exec = line.substr(5);
                     // Remove field codes like %f, %F, %u, %U
                     size_t pos = app->exec.find(" %");
                     if (pos != std::string::npos) {
                         app->exec = app->exec.substr(0, pos);
                     }
-                } else if (line.starts_with("Icon=")) {
+                } else if (hasBeginning(line, "Icon=")) {
                     app->icon = line.substr(5);
                 } else if (line == "NoDisplay=true" || line == "Hidden=true") {
                     isValid = false;
@@ -155,7 +171,7 @@ private:
 public:
     static std::string FindIcon(const std::string& iconName) {
         // If it's already a full path
-        if (iconName.starts_with("/") && fs::exists(iconName)) {
+        if (hasEnding(iconName, "/") && fs::exists(iconName)) {
             return iconName;
         }
         
@@ -163,7 +179,7 @@ public:
         
         for (const auto& basePath : GetIconSearchPaths()) {
             // Direct pixmaps search
-            if (basePath.ends_with("pixmaps")) {
+            if (hasEnding(basePath, "pixmaps")) {
                 for (const auto& ext : extensions) {
                     std::string path = basePath + "/" + iconName + ext;
                     if (fs::exists(path)) return path;
@@ -195,7 +211,7 @@ public:
         }
         
         // Load image based on extension
-        if (iconPath.ends_with(".svg")) {
+        if (hasEnding(iconPath, ".svg")) {
             // For SVG, we'd need a library like librsvg, so use default for now
             Image img = GenImageColor(ICON_SIZE, ICON_SIZE, LIGHTGRAY);
             tex = LoadTextureFromImage(img);
@@ -272,7 +288,7 @@ private:
     }
     
     void LaunchApp(int index) {
-        if (index >= 0 && index < apps.size()) {
+        if (index >= 0 && index < (int)apps.size()) {
             std::string command = apps[index]->exec + " &";
             system(command.c_str());
         }
@@ -309,8 +325,8 @@ public:
         LoadIcons();
         
         // Calculate max scroll
-        int rows = (apps.size() + GRID_COLS - 1) / GRID_COLS;
-        maxScrollY = std::max(0.0f, rows * CELL_HEIGHT - WINDOW_HEIGHT + 100);
+        int rows = ((int)apps.size() + GRID_COLS - 1) / GRID_COLS;
+        maxScrollY = std::max(0, rows * CELL_HEIGHT - WINDOW_HEIGHT + 100);
     }
     
     void HandleInput() {
@@ -318,7 +334,7 @@ public:
         
         // Mouse input
         Vector2 mousePos = GetMousePosition();
-        for (int i = 0; i < apps.size(); i++) {
+        for (int i = 0; i < (int)apps.size(); i++) {
             Rectangle cellRect = GetCellRect(i);
             if (CheckCollisionPointRec(mousePos, cellRect)) {
                 hoveredIndex = i;
@@ -331,13 +347,13 @@ public:
         
         // Keyboard navigation
         int cols = GRID_COLS;
-        if (IsKeyPressed(KEY_RIGHT) && selectedIndex % cols < cols - 1 && selectedIndex < apps.size() - 1) {
+        if (IsKeyPressed(KEY_RIGHT) && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1) {
             selectedIndex++;
         }
         if (IsKeyPressed(KEY_LEFT) && selectedIndex % cols > 0) {
             selectedIndex--;
         }
-        if (IsKeyPressed(KEY_DOWN) && selectedIndex + cols < apps.size()) {
+        if (IsKeyPressed(KEY_DOWN) && selectedIndex + cols < (int)apps.size()) {
             selectedIndex += cols;
         }
         if (IsKeyPressed(KEY_UP) && selectedIndex - cols >= 0) {
@@ -356,7 +372,7 @@ public:
             gamepadCooldown -= GetFrameTime();
             
             if (gamepadCooldown <= 0) {
-                if (axisX > GAMEPAD_DEADZONE && selectedIndex % cols < cols - 1 && selectedIndex < apps.size() - 1) {
+                if (axisX > GAMEPAD_DEADZONE && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1) {
                     selectedIndex++;
                     gamepadCooldown = 0.2f;
                 }
@@ -364,7 +380,7 @@ public:
                     selectedIndex--;
                     gamepadCooldown = 0.2f;
                 }
-                if (axisY > GAMEPAD_DEADZONE && selectedIndex + cols < apps.size()) {
+                if (axisY > GAMEPAD_DEADZONE && selectedIndex + cols < (int)apps.size()) {
                     selectedIndex += cols;
                     gamepadCooldown = 0.2f;
                 }
@@ -400,7 +416,7 @@ public:
         scrollY += (targetScrollY - scrollY) * SMOOTH_SCROLL_FACTOR;
         
         // Update animations
-        for (int i = 0; i < apps.size(); i++) {
+        for (int i = 0; i < (int)apps.size(); i++) {
             if (i == selectedIndex || i == hoveredIndex) {
                 apps[i]->targetScale = SELECTION_SCALE;
             } else {
@@ -419,7 +435,7 @@ public:
             Color{20, 20, 25, 255}, Color{40, 40, 50, 255});
         
         // Draw apps
-        for (int i = 0; i < apps.size(); i++) {
+        for (int i = 0; i < (int)apps.size(); i++) {
             Rectangle cellRect = GetCellRect(i);
             
             // Skip if outside visible area

@@ -15,7 +15,6 @@ cd src
 
     echo "🏢: Launcher"
     cd dendy_launcher
-        make install-deps
         make -j$(nproc)
         mv dendy_launcher ../../dendy/etc/dendy/dendy_launcher
         echo ""
