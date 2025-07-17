@@ -1,5 +1,4 @@
 // app_launcher.cpp - Apple TV style application launcher for Linux
-// Compile: g++ app_launcher.cpp -o app_launcher -lraylib -lm -lpthread -ldl -lrt -lX11 -std=c++17
 
 #include "include/raylib.h"
 #include <iostream>
@@ -16,9 +15,10 @@
 namespace fs = std::filesystem;
 
 // Configuration constants
-constexpr int WINDOW_WIDTH = 1280;
-constexpr int WINDOW_HEIGHT = 720;
-constexpr int GRID_COLS = 6;
+constexpr int INITIAL_WINDOW_WIDTH = 1280;
+constexpr int INITIAL_WINDOW_HEIGHT = 720;
+constexpr int MIN_GRID_COLS = 3;
+constexpr int MAX_GRID_COLS = 10;
 constexpr int ICON_SIZE = 128;
 constexpr int ICON_PADDING = 40;
 constexpr int TEXT_HEIGHT = 30;
@@ -244,6 +244,9 @@ private:
     float targetScrollY;
     float maxScrollY;
     Font font;
+    int currentGridCols;
+    int lastWindowWidth;
+    int lastWindowHeight;
     
     void LoadApplicationsFromDirectory(const fs::path& dir) {
         if (!fs::exists(dir) || !fs::is_directory(dir)) return;
@@ -277,11 +280,24 @@ private:
         }
     }
     
+    int CalculateGridColumns(int windowWidth) const {
+        int cols = windowWidth / CELL_WIDTH;
+        return std::clamp(cols, MIN_GRID_COLS, MAX_GRID_COLS);
+    }
+    
+    void UpdateMaxScroll() {
+        int windowHeight = GetScreenHeight();
+        int rows = ((int)apps.size() + currentGridCols - 1) / currentGridCols;
+        maxScrollY = std::max(0.0f, (float)(rows * CELL_HEIGHT - windowHeight + 100));
+    }
+    
     Rectangle GetCellRect(int index) const {
-        int row = index / GRID_COLS;
-        int col = index % GRID_COLS;
+        int windowWidth = GetScreenWidth();
+        int row = index / currentGridCols;
+        int col = index % currentGridCols;
         
-        float x = (WINDOW_WIDTH - GRID_COLS * CELL_WIDTH) / 2 + col * CELL_WIDTH;
+        float gridWidth = currentGridCols * CELL_WIDTH;
+        float x = (windowWidth - gridWidth) / 2 + col * CELL_WIDTH;
         float y = row * CELL_HEIGHT - scrollY + 50;
         
         return {x, y, (float)CELL_WIDTH, (float)CELL_HEIGHT};
@@ -294,8 +310,42 @@ private:
         }
     }
     
+    void CheckWindowResize() {
+        int windowWidth = GetScreenWidth();
+        int windowHeight = GetScreenHeight();
+        
+        if (windowWidth != lastWindowWidth || windowHeight != lastWindowHeight) {
+            lastWindowWidth = windowWidth;
+            lastWindowHeight = windowHeight;
+            
+            // Recalculate grid columns
+            int newGridCols = CalculateGridColumns(windowWidth);
+            
+            // If grid columns changed, adjust selected index to stay on same app
+            if (newGridCols != currentGridCols && selectedIndex >= 0) {
+                int row = selectedIndex / currentGridCols;
+                int col = selectedIndex % currentGridCols;
+                
+                // Clamp column to new grid
+                col = std::min(col, newGridCols - 1);
+                selectedIndex = row * newGridCols + col;
+                
+                // Ensure selected index is valid
+                selectedIndex = std::min(selectedIndex, (int)apps.size() - 1);
+            }
+            
+            currentGridCols = newGridCols;
+            UpdateMaxScroll();
+            
+            // Ensure scroll is within bounds
+            targetScrollY = std::clamp(targetScrollY, 0.0f, maxScrollY);
+        }
+    }
+    
 public:
-    AppLauncher() : selectedIndex(0), hoveredIndex(-1), scrollY(0), targetScrollY(0), maxScrollY(0) {
+    AppLauncher() : selectedIndex(0), hoveredIndex(-1), scrollY(0), targetScrollY(0), maxScrollY(0),
+                    currentGridCols(CalculateGridColumns(INITIAL_WINDOW_WIDTH)),
+                    lastWindowWidth(INITIAL_WINDOW_WIDTH), lastWindowHeight(INITIAL_WINDOW_HEIGHT) {
         font = LoadFontEx("assets/fonts/Inter-Regular.ttf", 20, nullptr, 0);
         if (!font.texture.id) {
             font = GetFontDefault();
@@ -323,14 +373,14 @@ public:
         
         SortApplications();
         LoadIcons();
-        
-        // Calculate max scroll
-        int rows = ((int)apps.size() + GRID_COLS - 1) / GRID_COLS;
-        maxScrollY = std::max(0, rows * CELL_HEIGHT - WINDOW_HEIGHT + 100);
+        UpdateMaxScroll();
     }
     
     void HandleInput() {
         hoveredIndex = -1;
+        
+        // Check for window resize
+        CheckWindowResize();
         
         // Mouse input
         Vector2 mousePos = GetMousePosition();
@@ -346,7 +396,7 @@ public:
         }
         
         // Keyboard navigation
-        int cols = GRID_COLS;
+        int cols = currentGridCols;
         if (IsKeyPressed(KEY_RIGHT) && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1) {
             selectedIndex++;
         }
@@ -403,10 +453,11 @@ public:
         
         // Ensure selected item is visible
         Rectangle selectedRect = GetCellRect(selectedIndex);
+        int windowHeight = GetScreenHeight();
         if (selectedRect.y < 50) {
             targetScrollY -= (50 - selectedRect.y);
-        } else if (selectedRect.y + CELL_HEIGHT > WINDOW_HEIGHT - 50) {
-            targetScrollY += (selectedRect.y + CELL_HEIGHT - WINDOW_HEIGHT + 50);
+        } else if (selectedRect.y + CELL_HEIGHT > windowHeight - 50) {
+            targetScrollY += (selectedRect.y + CELL_HEIGHT - windowHeight + 50);
         }
         
         // Clamp scroll
@@ -427,11 +478,14 @@ public:
     }
     
     void Draw() {
+        int windowWidth = GetScreenWidth();
+        int windowHeight = GetScreenHeight();
+        
         BeginDrawing();
         ClearBackground(Color{20, 20, 25, 255});
         
         // Draw gradient background
-        DrawRectangleGradientV(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 
+        DrawRectangleGradientV(0, 0, windowWidth, windowHeight, 
             Color{20, 20, 25, 255}, Color{40, 40, 50, 255});
         
         // Draw apps
@@ -439,7 +493,7 @@ public:
             Rectangle cellRect = GetCellRect(i);
             
             // Skip if outside visible area
-            if (cellRect.y + CELL_HEIGHT < 0 || cellRect.y > WINDOW_HEIGHT) continue;
+            if (cellRect.y + CELL_HEIGHT < 0 || cellRect.y > windowHeight) continue;
             
             float scale = apps[i]->scale;
             bool isSelected = (i == selectedIndex || i == hoveredIndex);
@@ -477,15 +531,21 @@ public:
         }
         
         // Draw top gradient fade
-        DrawRectangleGradientV(0, 0, WINDOW_WIDTH, 50, 
+        DrawRectangleGradientV(0, 0, windowWidth, 50, 
             Color{20, 20, 25, 255}, Color{20, 20, 25, 0});
         
         // Draw bottom gradient fade
-        DrawRectangleGradientV(0, WINDOW_HEIGHT - 50, WINDOW_WIDTH, 50, 
+        DrawRectangleGradientV(0, windowHeight - 50, windowWidth, 50, 
             Color{20, 20, 25, 0}, Color{20, 20, 25, 255});
         
         // Draw title
         DrawTextEx(font, "Applications", {20, 15}, 28, 1, WHITE);
+        
+        // Draw grid info in corner (for debugging, remove if not needed)
+        char info[64];
+        snprintf(info, sizeof(info), "Grid: %dx%d", currentGridCols, 
+                 ((int)apps.size() + currentGridCols - 1) / currentGridCols);
+        DrawTextEx(font, info, {windowWidth - 150, 20}, 14, 1, Color{150, 150, 150, 150});
         
         // Draw scroll indicator if needed
         if (maxScrollY > 0) {
@@ -494,8 +554,8 @@ public:
             float indicatorHeight = 40;
             float indicatorY = 100 + scrollPercent * (barHeight - indicatorHeight);
             
-            DrawRectangle(WINDOW_WIDTH - 10, 100, 4, barHeight, Color{100, 100, 100, 100});
-            DrawRectangle(WINDOW_WIDTH - 10, indicatorY, 4, indicatorHeight, Color{200, 200, 200, 200});
+            DrawRectangle(windowWidth - 10, 100, 4, barHeight, Color{100, 100, 100, 100});
+            DrawRectangle(windowWidth - 10, indicatorY, 4, indicatorHeight, Color{200, 200, 200, 200});
         }
         
         EndDrawing();
@@ -514,7 +574,7 @@ public:
 int main() {
     // Initialize window
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Application Launcher");
+    InitWindow(INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT, "Application Launcher");
     SetTargetFPS(60);
     
     // Create and run launcher

@@ -1,1 +1,2 @@
 chmod +x /etc/dendy/dendy_wm
+chmod +x /etc/dendy/home_application
