@@ -1,4 +1,4 @@
-// app_launcher.cpp - Apple TV style application launcher for Linux
+// app_launcher.cpp - Apple TV style application launcher for Linux with animations
 
 #include "include/raylib.h"
 #include <iostream>
@@ -15,20 +15,30 @@
 namespace fs = std::filesystem;
 
 // Configuration constants
-constexpr int INITIAL_WINDOW_WIDTH = 1280;
-constexpr int INITIAL_WINDOW_HEIGHT = 720;
+constexpr int INITIAL_WINDOW_WIDTH = 1920;
+constexpr int INITIAL_WINDOW_HEIGHT = 1080;
 constexpr int MIN_GRID_COLS = 3;
-constexpr int MAX_GRID_COLS = 10;
-constexpr int ICON_SIZE = 128;
-constexpr int ICON_PADDING = 40;
-constexpr int TEXT_HEIGHT = 30;
-constexpr int CELL_WIDTH = 200;
-constexpr int CELL_HEIGHT = 200;
+constexpr int MAX_GRID_COLS = 8;
+constexpr int ICON_SIZE = 196;
+constexpr int ICON_PADDING = 64;
+constexpr int TEXT_HEIGHT = 32;
+constexpr int CELL_WIDTH = 300;
+constexpr int CELL_HEIGHT = 300;
 constexpr float SCROLL_SPEED = 15.0f;
 constexpr float SMOOTH_SCROLL_FACTOR = 0.15f;
 constexpr float GAMEPAD_DEADZONE = 0.25f;
 constexpr float SELECTION_SCALE = 1.1f;
 constexpr float ANIMATION_SPEED = 0.2f;
+constexpr float FADE_IN_DURATION = 0.1f;
+constexpr float TILE_STAGGER_DELAY = 0.03f;
+constexpr float TILE_ANIMATION_DURATION = 0.5f;
+constexpr float LAUNCH_ANIMATION_DURATION = 0.6f;
+
+enum AnimationState {
+    ANIM_FADE_IN,
+    ANIM_NORMAL,
+    ANIM_LAUNCHING
+};
 
 bool hasBeginning (std::string const &fullString, std::string const &beginning) {
     if (fullString.length() >= beginning.length()) {
@@ -56,7 +66,14 @@ public:
     float scale;
     float targetScale;
     
-    AppEntry() : hasTexture(false), scale(1.0f), targetScale(1.0f) {}
+    // Animation properties
+    float animDelay;
+    float animProgress;
+    Vector2 animOffset;
+    float opacity;
+    
+    AppEntry() : hasTexture(false), scale(1.0f), targetScale(1.0f), 
+                 animDelay(0.0f), animProgress(0.0f), animOffset({0, 0}), opacity(0.0f) {}
     
     ~AppEntry() {
         if (hasTexture) {
@@ -76,7 +93,11 @@ public:
           texture(other.texture),
           hasTexture(other.hasTexture),
           scale(other.scale),
-          targetScale(other.targetScale) {
+          targetScale(other.targetScale),
+          animDelay(other.animDelay),
+          animProgress(other.animProgress),
+          animOffset(other.animOffset),
+          opacity(other.opacity) {
         other.hasTexture = false;
     }
     
@@ -90,6 +111,10 @@ public:
             hasTexture = other.hasTexture;
             scale = other.scale;
             targetScale = other.targetScale;
+            animDelay = other.animDelay;
+            animProgress = other.animProgress;
+            animOffset = other.animOffset;
+            opacity = other.opacity;
             other.hasTexture = false;
         }
         return *this;
@@ -97,6 +122,54 @@ public:
     
     void UpdateAnimation() {
         scale += (targetScale - scale) * ANIMATION_SPEED;
+    }
+    
+    void UpdateFadeInAnimation(float deltaTime) {
+        if (animProgress < 1.0f) {
+            animProgress = std::min(1.0f, animProgress + deltaTime / TILE_ANIMATION_DURATION);
+            
+            // Easing function for smooth animation
+            float easedProgress = 1.0f - pow(1.0f - animProgress, 3.0f);
+            
+            // Fade in opacity
+            opacity = easedProgress;
+            
+            // Slide up animation
+            animOffset.y = (1.0f - easedProgress) * 30.0f;
+            
+            // Scale animation
+            scale = 0.8f + 0.2f * easedProgress;
+        }
+    }
+    
+    void UpdateLaunchAnimation(float progress, int index, int totalApps, Vector2 centerPoint) {
+        // Calculate direction from center
+        Vector2 direction = {
+            animOffset.x - centerPoint.x,
+            animOffset.y - centerPoint.y
+        };
+        
+        // Normalize and apply force
+        float length = sqrt(direction.x * direction.x + direction.y * direction.y);
+        if (length > 0) {
+            direction.x /= length;
+            direction.y /= length;
+        } else {
+            // Random direction if at center
+            direction.x = cos(index * 0.5f);
+            direction.y = sin(index * 0.5f);
+        }
+        
+        // Accelerating motion
+        float force = progress * progress * 1000.0f;
+        animOffset.x += direction.x * force;
+        animOffset.y += direction.y * force;
+        
+        // Fade out
+        opacity = 1.0f - progress;
+        
+        // Spin and shrink
+        scale = (1.0f - progress * 0.5f) * targetScale;
     }
 };
 
@@ -247,6 +320,16 @@ private:
     int currentGridCols;
     int lastWindowWidth;
     int lastWindowHeight;
+    bool wasFocusedLastFrame = true;
+    Sound fxMove = LoadSound("/etc/dendy/assets/move.wav");
+    Sound fxSelect = LoadSound("/etc/dendy/assets/select.wav");
+    
+    // Animation state
+    AnimationState animState;
+    float animTimer;
+    float fadeAlpha;
+    int launchingAppIndex;
+    std::string pendingLaunchCommand;
     
     void LoadApplicationsFromDirectory(const fs::path& dir) {
         if (!fs::exists(dir) || !fs::is_directory(dir)) return;
@@ -280,6 +363,15 @@ private:
         }
     }
     
+    void InitializeAnimations() {
+        // Set up staggered animation delays for Windows Phone effect
+        for (int i = 0; i < (int)apps.size(); i++) {
+            apps[i]->animDelay = i * TILE_STAGGER_DELAY;
+            apps[i]->animProgress = 0.0f;
+            apps[i]->opacity = 0.0f;
+        }
+    }
+    
     int CalculateGridColumns(int windowWidth) const {
         int cols = windowWidth / CELL_WIDTH;
         return std::clamp(cols, MIN_GRID_COLS, MAX_GRID_COLS);
@@ -305,8 +397,18 @@ private:
     
     void LaunchApp(int index) {
         if (index >= 0 && index < (int)apps.size()) {
-            std::string command = apps[index]->exec + " &";
-            system(command.c_str());
+            // Start launch animation
+            animState = ANIM_LAUNCHING;
+            animTimer = 0.0f;
+            launchingAppIndex = index;
+            pendingLaunchCommand = apps[index]->exec + " &";
+            
+            // Set initial positions for launch animation
+            for (int i = 0; i < (int)apps.size(); i++) {
+                Rectangle rect = GetCellRect(i);
+                apps[i]->animOffset.x = rect.x + rect.width / 2;
+                apps[i]->animOffset.y = rect.y + rect.height / 2;
+            }
         }
     }
     
@@ -345,7 +447,9 @@ private:
 public:
     AppLauncher() : selectedIndex(0), hoveredIndex(-1), scrollY(0), targetScrollY(0), maxScrollY(0),
                     currentGridCols(CalculateGridColumns(INITIAL_WINDOW_WIDTH)),
-                    lastWindowWidth(INITIAL_WINDOW_WIDTH), lastWindowHeight(INITIAL_WINDOW_HEIGHT) {
+                    lastWindowWidth(INITIAL_WINDOW_WIDTH), lastWindowHeight(INITIAL_WINDOW_HEIGHT),
+                    animState(ANIM_FADE_IN), animTimer(0.0f), fadeAlpha(1.0f), 
+                    launchingAppIndex(-1) {
         font = LoadFontEx("assets/fonts/Inter-Regular.ttf", 20, nullptr, 0);
         if (!font.texture.id) {
             font = GetFontDefault();
@@ -373,10 +477,14 @@ public:
         
         SortApplications();
         LoadIcons();
+        InitializeAnimations();
         UpdateMaxScroll();
     }
     
     void HandleInput() {
+        // Don't handle input during animations
+        if (animState == ANIM_LAUNCHING) return;
+        
         hoveredIndex = -1;
         
         // Check for window resize
@@ -399,18 +507,23 @@ public:
         int cols = currentGridCols;
         if (IsKeyPressed(KEY_RIGHT) && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1) {
             selectedIndex++;
+            PlaySound(fxMove);
         }
         if (IsKeyPressed(KEY_LEFT) && selectedIndex % cols > 0) {
             selectedIndex--;
+            PlaySound(fxMove);
         }
         if (IsKeyPressed(KEY_DOWN) && selectedIndex + cols < (int)apps.size()) {
             selectedIndex += cols;
+            PlaySound(fxMove);
         }
         if (IsKeyPressed(KEY_UP) && selectedIndex - cols >= 0) {
             selectedIndex -= cols;
+            PlaySound(fxMove);
         }
         if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) {
             LaunchApp(selectedIndex);
+            PlaySound(fxSelect);
         }
         
         // Gamepad navigation
@@ -477,6 +590,77 @@ public:
         }
     }
     
+    void UpdateAnimations() {
+        float deltaTime = GetFrameTime();
+        animTimer += deltaTime;
+        
+        switch (animState) {
+            case ANIM_FADE_IN:
+                // Update fade alpha
+                fadeAlpha = 1.0f - (animTimer / FADE_IN_DURATION);
+                if (fadeAlpha < 0) fadeAlpha = 0;
+                
+                // Update app animations
+                for (auto& app : apps) {
+                    if (animTimer > app->animDelay) {
+                        app->UpdateFadeInAnimation(deltaTime);
+                    }
+                }
+                
+                // Check if fade in is complete
+                if (animTimer > FADE_IN_DURATION + apps.size() * TILE_STAGGER_DELAY + TILE_ANIMATION_DURATION) {
+                    animState = ANIM_NORMAL;
+                    fadeAlpha = 0;
+                }
+                break;
+                
+            case ANIM_LAUNCHING:
+                {
+                    float progress = animTimer / LAUNCH_ANIMATION_DURATION;
+                    if (progress > 1.0f) progress = 1.0f;
+                    
+                    // Calculate center point of launching app
+                    Rectangle launchRect = GetCellRect(launchingAppIndex);
+                    Vector2 centerPoint = {
+                        launchRect.x + launchRect.width / 2,
+                        launchRect.y + launchRect.height / 2
+                    };
+                    
+                    // Update each app's launch animation
+                    for (int i = 0; i < (int)apps.size(); i++) {
+                        apps[i]->UpdateLaunchAnimation(progress, i, apps.size(), centerPoint);
+                    }
+                    
+                    // Fade to black
+                    fadeAlpha = progress;
+                    
+                    // Launch the app when animation is complete
+                    if (progress >= 1.0f && !pendingLaunchCommand.empty()) {
+                        system(pendingLaunchCommand.c_str());
+                        pendingLaunchCommand.clear();
+                    }
+
+                    // Handle restore animation
+                    if (IsWindowFocused()) {
+                        if (!wasFocusedLastFrame) {
+                            animState = ANIM_FADE_IN;
+                            animTimer = 0.0f;
+                            InitializeAnimations();
+                        }
+
+                        wasFocusedLastFrame = true;
+                    } else {
+                        wasFocusedLastFrame = false;
+                    }
+                }
+                break;
+                
+            case ANIM_NORMAL:
+                // Normal state, no special animations
+                break;
+        }
+    }
+    
     void Draw() {
         int windowWidth = GetScreenWidth();
         int windowHeight = GetScreenHeight();
@@ -492,70 +676,97 @@ public:
         for (int i = 0; i < (int)apps.size(); i++) {
             Rectangle cellRect = GetCellRect(i);
             
-            // Skip if outside visible area
-            if (cellRect.y + CELL_HEIGHT < 0 || cellRect.y > windowHeight) continue;
+            // Skip if outside visible area (only in normal state)
+            if (animState == ANIM_NORMAL && (cellRect.y + CELL_HEIGHT < 0 || cellRect.y > windowHeight)) continue;
             
             float scale = apps[i]->scale;
+            float opacity = apps[i]->opacity;
             bool isSelected = (i == selectedIndex || i == hoveredIndex);
             
+            // Apply animation offsets
+            float drawX = cellRect.x;
+            float drawY = cellRect.y;
+            
+            if (animState == ANIM_FADE_IN) {
+                drawY += apps[i]->animOffset.y;
+            } else if (animState == ANIM_LAUNCHING) {
+                drawX = apps[i]->animOffset.x - cellRect.width / 2;
+                drawY = apps[i]->animOffset.y - cellRect.height / 2;
+            }
+            
             // Draw selection highlight
-            if (isSelected) {
+            if (isSelected && animState == ANIM_NORMAL) {
+                Color highlightColor = {60, 60, 70, (unsigned char)(100 * opacity)};
                 DrawRectangleRounded(
-                    {cellRect.x + 10, cellRect.y + 10, cellRect.width - 20, cellRect.height - 20},
-                    0.1f, 8, Color{60, 60, 70, 100}
+                    {drawX + 10, drawY + 10, cellRect.width - 20, cellRect.height - 20},
+                    0.1f, 8, highlightColor
                 );
             }
             
             // Draw icon with scaling
-            float iconX = cellRect.x + cellRect.width / 2;
-            float iconY = cellRect.y + CELL_HEIGHT / 2 - 20;
+            float iconX = drawX + cellRect.width / 2;
+            float iconY = drawY + CELL_HEIGHT / 2 - 20;
             float scaledSize = ICON_SIZE * scale;
             
             if (apps[i]->hasTexture) {
+                Color tint = {255, 255, 255, (unsigned char)(255 * opacity)};
                 DrawTexturePro(
                     apps[i]->texture,
                     {0, 0, (float)apps[i]->texture.width, (float)apps[i]->texture.height},
                     {iconX - scaledSize/2, iconY - scaledSize/2, scaledSize, scaledSize},
-                    {0, 0}, 0, WHITE
+                    {0, 0}, 0, tint
                 );
             }
             
             // Draw app name
             Vector2 textSize = MeasureTextEx(font, apps[i]->name.c_str(), 18, 1);
-            float textX = cellRect.x + cellRect.width / 2 - textSize.x / 2;
+            float textX = drawX + cellRect.width / 2 - textSize.x / 2;
             float textY = iconY + scaledSize/2 + 10;
             
             // Draw text shadow
-            DrawTextEx(font, apps[i]->name.c_str(), {textX + 1, textY + 1}, 18, 1, Color{0, 0, 0, 180});
-            DrawTextEx(font, apps[i]->name.c_str(), {textX, textY}, 18, 1, WHITE);
+            Color shadowColor = {0, 0, 0, (unsigned char)(180 * opacity)};
+            Color textColor = {255, 255, 255, (unsigned char)(255 * opacity)};
+            DrawTextEx(font, apps[i]->name.c_str(), {textX + 1, textY + 1}, 18, 1, shadowColor);
+            DrawTextEx(font, apps[i]->name.c_str(), {textX, textY}, 18, 1, textColor);
         }
         
-        // Draw top gradient fade
-        DrawRectangleGradientV(0, 0, windowWidth, 50, 
-            Color{20, 20, 25, 255}, Color{20, 20, 25, 0});
-        
-        // Draw bottom gradient fade
-        DrawRectangleGradientV(0, windowHeight - 50, windowWidth, 50, 
-            Color{20, 20, 25, 0}, Color{20, 20, 25, 255});
-        
-        // Draw title
-        DrawTextEx(font, "Applications", {20, 15}, 28, 1, WHITE);
-        
-        // Draw grid info in corner (for debugging, remove if not needed)
-        char info[64];
-        snprintf(info, sizeof(info), "Grid: %dx%d", currentGridCols, 
-                 ((int)apps.size() + currentGridCols - 1) / currentGridCols);
-        DrawTextEx(font, info, {windowWidth - 150, 20}, 14, 1, Color{150, 150, 150, 150});
-        
-        // Draw scroll indicator if needed
-        if (maxScrollY > 0) {
-            float scrollPercent = scrollY / maxScrollY;
-            float barHeight = 200;
-            float indicatorHeight = 40;
-            float indicatorY = 100 + scrollPercent * (barHeight - indicatorHeight);
+        // Draw UI elements only in normal state
+        if (animState != ANIM_LAUNCHING) {
+            // Draw top gradient fade
+            DrawRectangleGradientV(0, 0, windowWidth, 50, 
+                Color{20, 20, 25, 255}, Color{20, 20, 25, 0});
             
-            DrawRectangle(windowWidth - 10, 100, 4, barHeight, Color{100, 100, 100, 100});
-            DrawRectangle(windowWidth - 10, indicatorY, 4, indicatorHeight, Color{200, 200, 200, 200});
+            // Draw bottom gradient fade
+            DrawRectangleGradientV(0, windowHeight - 50, windowWidth, 50, 
+                Color{20, 20, 25, 0}, Color{20, 20, 25, 255});
+            
+            // Draw title
+            DrawTextEx(font, "Applications", {20, 15}, 28, 1, WHITE);
+            
+            // Draw grid info in corner
+            /*
+            char info[64];
+            snprintf(info, sizeof(info), "Grid: %dx%d", currentGridCols, 
+                     ((int)apps.size() + currentGridCols - 1) / currentGridCols);
+            DrawTextEx(font, info, {windowWidth - 150, 20}, 14, 1, Color{150, 150, 150, 150});
+            */
+            
+            // Draw scroll indicator if needed
+            if (maxScrollY > 0) {
+                float scrollPercent = scrollY / maxScrollY;
+                float barHeight = 200;
+                float indicatorHeight = 40;
+                float indicatorY = 100 + scrollPercent * (barHeight - indicatorHeight);
+                
+                DrawRectangle(windowWidth - 10, 100, 4, barHeight, Color{100, 100, 100, 100});
+                DrawRectangle(windowWidth - 10, indicatorY, 4, indicatorHeight, Color{200, 200, 200, 200});
+            }
+        }
+        
+        // Draw fade overlay
+        if (fadeAlpha > 0) {
+            DrawRectangle(0, 0, windowWidth, windowHeight, 
+                Color{0, 0, 0, (unsigned char)(255 * fadeAlpha)});
         }
         
         EndDrawing();
@@ -565,6 +776,7 @@ public:
         LoadApplications();
         
         while (!WindowShouldClose()) {
+            UpdateAnimations();
             HandleInput();
             Draw();
         }
@@ -575,8 +787,12 @@ int main() {
     // Initialize window
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
     InitWindow(INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT, "Application Launcher");
+    InitAudioDevice();
     SetTargetFPS(60);
     
+    Sound fxLogin = LoadSound("/etc/dendy/assets/login.wav");
+    PlaySound(fxLogin);
+
     // Create and run launcher
     AppLauncher launcher;
     launcher.Run();
