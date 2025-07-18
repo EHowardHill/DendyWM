@@ -35,7 +35,6 @@ void (*core_retro_set_input_poll)(retro_input_poll_t);
 void (*core_retro_set_input_state)(retro_input_state_t);
 void (*core_retro_set_environment)(retro_environment_t);
 
-
 // Application state
 bool g_running = true;
 void *g_core_handle = nullptr;
@@ -52,7 +51,7 @@ const std::unordered_map<std::string, std::string> core_map = {
     {".gb", "mgba_libretro.so"},
     {".sfc", "snes9x_libretro.so"},
     {".smc", "snes9x_libretro.so"},
-    {".nes", "fceumm_libretro.so"},
+    {".nes", "nestopia_libretro.so"},
     {".md", "genesis_plus_gx_libretro.so"},
     {".gen", "genesis_plus_gx_libretro.so"},
     {".gg", "genesis_plus_gx_libretro.so"},
@@ -220,12 +219,12 @@ int16_t callback_input_state(unsigned port, unsigned /*device*/, unsigned /*inde
 
 // --- Helper Functions ---
 
-#define LOAD_SYM(V, S)                                                  \
-    do                                                                  \
-    {                                                                   \
-        V = (decltype(V))dlsym(g_core_handle, #S);                      \
-        if (!V)                                                         \
-            throw std::runtime_error("Failed to load symbol: " #S);     \
+#define LOAD_SYM(V, S)                                              \
+    do                                                              \
+    {                                                               \
+        V = (decltype(V))dlsym(g_core_handle, #S);                  \
+        if (!V)                                                     \
+            throw std::runtime_error("Failed to load symbol: " #S); \
     } while (0)
 
 void load_core(const std::string &core_path)
@@ -338,16 +337,17 @@ bool load_rom(const std::string &rom_path)
         std::streamsize size = file.tellg();
         file.seekg(0, std::ios::beg);
         rom_data.resize(size);
-        if (file.read((char*)rom_data.data(), size))
+        if (file.read((char *)rom_data.data(), size))
         {
             game_info.data = rom_data.data();
             game_info.size = rom_data.size();
         }
-    } else {
+    }
+    else
+    {
         std::cerr << "Failed to open ROM file: " << rom_path << std::endl;
         return false;
     }
-
 
     if (!core_retro_load_game(&game_info))
     {
@@ -415,18 +415,16 @@ int main(int argc, char *argv[])
         struct retro_system_av_info av_info;
         core_retro_get_system_av_info(&av_info);
         init_audio(av_info.timing.sample_rate);
-        
+
         // Window size might be based on core geometry
         int w_width, w_height;
         SDL_GetWindowSize(g_window, &w_width, &w_height);
         glViewport(0, 0, w_width, w_height);
 
-
         if (!load_rom(rom_path))
         {
             throw std::runtime_error("Failed to load ROM.");
         }
-
 
         // Main loop
         while (g_running)

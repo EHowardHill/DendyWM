@@ -34,29 +34,39 @@ constexpr float TILE_STAGGER_DELAY = 0.03f;
 constexpr float TILE_ANIMATION_DURATION = 0.5f;
 constexpr float LAUNCH_ANIMATION_DURATION = 0.6f;
 
-enum AnimationState {
+enum AnimationState
+{
     ANIM_FADE_IN,
     ANIM_NORMAL,
     ANIM_LAUNCHING
 };
 
-bool hasBeginning (std::string const &fullString, std::string const &beginning) {
-    if (fullString.length() >= beginning.length()) {
+bool hasBeginning(std::string const &fullString, std::string const &beginning)
+{
+    if (fullString.length() >= beginning.length())
+    {
         return (0 == fullString.compare(0, beginning.length(), beginning));
-    } else {
+    }
+    else
+    {
         return false;
     }
 }
 
-bool hasEnding (std::string const &fullString, std::string const &ending) {
-    if (fullString.length() >= ending.length()) {
-        return (0 == fullString.compare (fullString.length() - ending.length(), ending.length(), ending));
-    } else {
+bool hasEnding(std::string const &fullString, std::string const &ending)
+{
+    if (fullString.length() >= ending.length())
+    {
+        return (0 == fullString.compare(fullString.length() - ending.length(), ending.length(), ending));
+    }
+    else
+    {
         return false;
     }
 }
 
-class AppEntry {
+class AppEntry
+{
 public:
     std::string name;
     std::string exec;
@@ -65,28 +75,30 @@ public:
     bool hasTexture;
     float scale;
     float targetScale;
-    
+
     // Animation properties
     float animDelay;
     float animProgress;
     Vector2 animOffset;
     float opacity;
-    
-    AppEntry() : hasTexture(false), scale(1.0f), targetScale(1.0f), 
+
+    AppEntry() : hasTexture(false), scale(1.0f), targetScale(1.0f),
                  animDelay(0.0f), animProgress(0.0f), animOffset({0, 0}), opacity(0.0f) {}
-    
-    ~AppEntry() {
-        if (hasTexture) {
+
+    ~AppEntry()
+    {
+        if (hasTexture)
+        {
             UnloadTexture(texture);
         }
     }
-    
+
     // Disable copy to avoid texture issues
-    AppEntry(const AppEntry&) = delete;
-    AppEntry& operator=(const AppEntry&) = delete;
-    
+    AppEntry(const AppEntry &) = delete;
+    AppEntry &operator=(const AppEntry &) = delete;
+
     // Enable move
-    AppEntry(AppEntry&& other) noexcept 
+    AppEntry(AppEntry &&other) noexcept
         : name(std::move(other.name)),
           exec(std::move(other.exec)),
           icon(std::move(other.icon)),
@@ -97,13 +109,17 @@ public:
           animDelay(other.animDelay),
           animProgress(other.animProgress),
           animOffset(other.animOffset),
-          opacity(other.opacity) {
+          opacity(other.opacity)
+    {
         other.hasTexture = false;
     }
-    
-    AppEntry& operator=(AppEntry&& other) noexcept {
-        if (this != &other) {
-            if (hasTexture) UnloadTexture(texture);
+
+    AppEntry &operator=(AppEntry &&other) noexcept
+    {
+        if (this != &other)
+        {
+            if (hasTexture)
+                UnloadTexture(texture);
             name = std::move(other.name);
             exec = std::move(other.exec);
             icon = std::move(other.icon);
@@ -119,196 +135,242 @@ public:
         }
         return *this;
     }
-    
-    void UpdateAnimation() {
+
+    void UpdateAnimation()
+    {
         scale += (targetScale - scale) * ANIMATION_SPEED;
     }
-    
-    void UpdateFadeInAnimation(float deltaTime) {
-        if (animProgress < 1.0f) {
+
+    void UpdateFadeInAnimation(float deltaTime)
+    {
+        if (animProgress < 1.0f)
+        {
             animProgress = std::min(1.0f, animProgress + deltaTime / TILE_ANIMATION_DURATION);
-            
+
             // Easing function for smooth animation
             float easedProgress = 1.0f - pow(1.0f - animProgress, 3.0f);
-            
+
             // Fade in opacity
             opacity = easedProgress;
-            
+
             // Slide up animation
             animOffset.y = (1.0f - easedProgress) * 30.0f;
-            
+
             // Scale animation
             scale = 0.8f + 0.2f * easedProgress;
         }
     }
-    
-    void UpdateLaunchAnimation(float progress, int index, int totalApps, Vector2 centerPoint) {
+
+    void UpdateLaunchAnimation(float progress, int index, int totalApps, Vector2 centerPoint)
+    {
         // Calculate direction from center
         Vector2 direction = {
             animOffset.x - centerPoint.x,
-            animOffset.y - centerPoint.y
-        };
-        
+            animOffset.y - centerPoint.y};
+
         // Normalize and apply force
         float length = sqrt(direction.x * direction.x + direction.y * direction.y);
-        if (length > 0) {
+        if (length > 0)
+        {
             direction.x /= length;
             direction.y /= length;
-        } else {
+        }
+        else
+        {
             // Random direction if at center
             direction.x = cos(index * 0.5f);
             direction.y = sin(index * 0.5f);
         }
-        
+
         // Accelerating motion
         float force = progress * progress * 1000.0f;
         animOffset.x += direction.x * force;
         animOffset.y += direction.y * force;
-        
+
         // Fade out
         opacity = 1.0f - progress;
-        
+
         // Spin and shrink
         scale = (1.0f - progress * 0.5f) * targetScale;
     }
 };
 
-class DesktopFileParser {
+class DesktopFileParser
+{
 private:
-    static std::string Trim(const std::string& str) {
+    static std::string Trim(const std::string &str)
+    {
         size_t first = str.find_first_not_of(" \t\n\r");
-        if (first == std::string::npos) return "";
+        if (first == std::string::npos)
+            return "";
         size_t last = str.find_last_not_of(" \t\n\r");
         return str.substr(first, (last - first + 1));
     }
-    
+
 public:
-    static std::unique_ptr<AppEntry> ParseFile(const fs::path& filepath) {
+    static std::unique_ptr<AppEntry> ParseFile(const fs::path &filepath)
+    {
         std::ifstream file(filepath);
-        if (!file.is_open()) return nullptr;
-        
+        if (!file.is_open())
+            return nullptr;
+
         auto app = std::make_unique<AppEntry>();
         std::string line;
         bool inDesktopEntry = false;
         bool isValid = true;
-        
-        while (std::getline(file, line)) {
+
+        while (std::getline(file, line))
+        {
             line = Trim(line);
-            
-            if (line == "[Desktop Entry]") {
+
+            if (line == "[Desktop Entry]")
+            {
                 inDesktopEntry = true;
-            } else if (hasBeginning(line, "[")) {
+            }
+            else if (hasBeginning(line, "["))
+            {
                 inDesktopEntry = false;
-            } else if (inDesktopEntry && !line.empty()) {
-                if (hasBeginning(line, "Name=") && app->name.empty()) {
+            }
+            else if (inDesktopEntry && !line.empty())
+            {
+                if (hasBeginning(line, "Name=") && app->name.empty())
+                {
                     app->name = line.substr(5);
-                } else if (hasBeginning(line, "Exec=")) {
+                }
+                else if (hasBeginning(line, "Exec="))
+                {
                     app->exec = line.substr(5);
                     // Remove field codes like %f, %F, %u, %U
                     size_t pos = app->exec.find(" %");
-                    if (pos != std::string::npos) {
+                    if (pos != std::string::npos)
+                    {
                         app->exec = app->exec.substr(0, pos);
                     }
-                } else if (hasBeginning(line, "Icon=")) {
+                }
+                else if (hasBeginning(line, "Icon="))
+                {
                     app->icon = line.substr(5);
-                } else if (line == "NoDisplay=true" || line == "Hidden=true") {
+                }
+                else if (line == "NoDisplay=true" || line == "Hidden=true")
+                {
                     isValid = false;
                     break;
                 }
             }
         }
-        
-        if (!isValid || app->name.empty() || app->exec.empty()) {
+
+        if (!isValid || app->name.empty() || app->exec.empty())
+        {
             return nullptr;
         }
-        
+
         return app;
     }
 };
 
-class IconLoader {
+class IconLoader
+{
 private:
-    static std::vector<std::string> GetIconSearchPaths() {
+    static std::vector<std::string> GetIconSearchPaths()
+    {
         return {
             "/usr/share/icons/hicolor",
             "/usr/share/icons/gnome",
             "/usr/share/icons/Adwaita",
-            "/usr/share/pixmaps"
-        };
+            "/usr/share/pixmaps"};
     }
-    
-    static std::vector<std::string> GetIconSizes() {
+
+    static std::vector<std::string> GetIconSizes()
+    {
         return {"128x128", "256x256", "scalable", "64x64", "48x48"};
     }
-    
+
 public:
-    static std::string FindIcon(const std::string& iconName) {
+    static std::string FindIcon(const std::string &iconName)
+    {
         // If it's already a full path
-        if (hasEnding(iconName, "/") && fs::exists(iconName)) {
+        if (hasEnding(iconName, "/") && fs::exists(iconName))
+        {
             return iconName;
         }
-        
+
         std::vector<std::string> extensions = {".png", ".svg", ".xpm", ""};
-        
-        for (const auto& basePath : GetIconSearchPaths()) {
+
+        for (const auto &basePath : GetIconSearchPaths())
+        {
             // Direct pixmaps search
-            if (hasEnding(basePath, "pixmaps")) {
-                for (const auto& ext : extensions) {
+            if (hasEnding(basePath, "pixmaps"))
+            {
+                for (const auto &ext : extensions)
+                {
                     std::string path = basePath + "/" + iconName + ext;
-                    if (fs::exists(path)) return path;
+                    if (fs::exists(path))
+                        return path;
                 }
                 continue;
             }
-            
+
             // Themed icon search
-            for (const auto& size : GetIconSizes()) {
-                for (const auto& ext : extensions) {
+            for (const auto &size : GetIconSizes())
+            {
+                for (const auto &ext : extensions)
+                {
                     std::string path = basePath + "/" + size + "/apps/" + iconName + ext;
-                    if (fs::exists(path)) return path;
+                    if (fs::exists(path))
+                        return path;
                 }
             }
         }
-        
+
         return "";
     }
-    
-    static Texture2D LoadIconTexture(const std::string& iconPath) {
+
+    static Texture2D LoadIconTexture(const std::string &iconPath)
+    {
         Texture2D tex = {0};
-        
-        if (iconPath.empty()) {
+
+        if (iconPath.empty())
+        {
             // Create default icon
             Image img = GenImageColor(ICON_SIZE, ICON_SIZE, LIGHTGRAY);
             tex = LoadTextureFromImage(img);
             UnloadImage(img);
             return tex;
         }
-        
+
         // Load image based on extension
-        if (hasEnding(iconPath, ".svg")) {
+        if (hasEnding(iconPath, ".svg"))
+        {
             // For SVG, we'd need a library like librsvg, so use default for now
             Image img = GenImageColor(ICON_SIZE, ICON_SIZE, LIGHTGRAY);
             tex = LoadTextureFromImage(img);
             UnloadImage(img);
-        } else {
+        }
+        else
+        {
             Image img = LoadImage(iconPath.c_str());
-            if (img.data) {
+            if (img.data)
+            {
                 // Resize to standard icon size
                 ImageResize(&img, ICON_SIZE, ICON_SIZE);
                 tex = LoadTextureFromImage(img);
                 UnloadImage(img);
-            } else {
+            }
+            else
+            {
                 // Fallback to default
                 img = GenImageColor(ICON_SIZE, ICON_SIZE, LIGHTGRAY);
                 tex = LoadTextureFromImage(img);
                 UnloadImage(img);
             }
         }
-        
+
         return tex;
     }
 };
 
-class AppLauncher {
+class AppLauncher
+{
 private:
     std::vector<std::unique_ptr<AppEntry>> apps;
     int selectedIndex;
@@ -323,459 +385,535 @@ private:
     bool wasFocusedLastFrame = true;
     Sound fxMove = LoadSound("/etc/dendy/assets/move.wav");
     Sound fxSelect = LoadSound("/etc/dendy/assets/select.wav");
-    
+    Font fontBold = LoadFontEx("/etc/dendy/assets/fonts/Bogart-Black-trial.ttf", 96, 0, 250);
+
     // Animation state
     AnimationState animState;
     float animTimer;
     float fadeAlpha;
     int launchingAppIndex;
     std::string pendingLaunchCommand;
-    
-    void LoadApplicationsFromDirectory(const fs::path& dir) {
-        if (!fs::exists(dir) || !fs::is_directory(dir)) return;
-        
-        for (const auto& entry : fs::directory_iterator(dir)) {
-            if (entry.path().extension() == ".desktop") {
+
+    void LoadApplicationsFromDirectory(const fs::path &dir)
+    {
+        if (!fs::exists(dir) || !fs::is_directory(dir))
+            return;
+
+        for (const auto &entry : fs::directory_iterator(dir))
+        {
+            if (entry.path().extension() == ".desktop")
+            {
                 auto app = DesktopFileParser::ParseFile(entry.path());
-                if (app) {
+                if (app)
+                {
                     apps.push_back(std::move(app));
                 }
             }
         }
     }
-    
-    void SortApplications() {
-        std::sort(apps.begin(), apps.end(), 
-            [](const std::unique_ptr<AppEntry>& a, const std::unique_ptr<AppEntry>& b) {
-                return std::lexicographical_compare(
-                    a->name.begin(), a->name.end(),
-                    b->name.begin(), b->name.end(),
-                    [](char c1, char c2) { return std::tolower(c1) < std::tolower(c2); }
-                );
-            });
+
+    void SortApplications()
+    {
+        std::sort(apps.begin(), apps.end(),
+                  [](const std::unique_ptr<AppEntry> &a, const std::unique_ptr<AppEntry> &b)
+                  {
+                      return std::lexicographical_compare(
+                          a->name.begin(), a->name.end(),
+                          b->name.begin(), b->name.end(),
+                          [](char c1, char c2)
+                          { return std::tolower(c1) < std::tolower(c2); });
+                  });
     }
-    
-    void LoadIcons() {
-        for (auto& app : apps) {
+
+    void LoadIcons()
+    {
+        for (auto &app : apps)
+        {
             std::string iconPath = IconLoader::FindIcon(app->icon);
             app->texture = IconLoader::LoadIconTexture(iconPath);
             app->hasTexture = true;
         }
     }
-    
-    void InitializeAnimations() {
+
+    void InitializeAnimations()
+    {
         // Set up staggered animation delays for Windows Phone effect
-        for (int i = 0; i < (int)apps.size(); i++) {
+        for (int i = 0; i < (int)apps.size(); i++)
+        {
             apps[i]->animDelay = i * TILE_STAGGER_DELAY;
             apps[i]->animProgress = 0.0f;
             apps[i]->opacity = 0.0f;
         }
     }
-    
-    int CalculateGridColumns(int windowWidth) const {
+
+    int CalculateGridColumns(int windowWidth) const
+    {
         int cols = windowWidth / CELL_WIDTH;
         return std::clamp(cols, MIN_GRID_COLS, MAX_GRID_COLS);
     }
-    
-    void UpdateMaxScroll() {
+
+    void UpdateMaxScroll()
+    {
         int windowHeight = GetScreenHeight();
         int rows = ((int)apps.size() + currentGridCols - 1) / currentGridCols;
         maxScrollY = std::max(0.0f, (float)(rows * CELL_HEIGHT - windowHeight + 100));
     }
-    
-    Rectangle GetCellRect(int index) const {
+
+    Rectangle GetCellRect(int index) const
+    {
         int windowWidth = GetScreenWidth();
         int row = index / currentGridCols;
         int col = index % currentGridCols;
-        
+
         float gridWidth = currentGridCols * CELL_WIDTH;
         float x = (windowWidth - gridWidth) / 2 + col * CELL_WIDTH;
-        float y = row * CELL_HEIGHT - scrollY + 50;
-        
+        float y = row * CELL_HEIGHT - scrollY + 100;
+
         return {x, y, (float)CELL_WIDTH, (float)CELL_HEIGHT};
     }
-    
-    void LaunchApp(int index) {
-        if (index >= 0 && index < (int)apps.size()) {
+
+    void LaunchApp(int index)
+    {
+        if (index >= 0 && index < (int)apps.size())
+        {
             // Start launch animation
             animState = ANIM_LAUNCHING;
             animTimer = 0.0f;
             launchingAppIndex = index;
             pendingLaunchCommand = apps[index]->exec + " &";
-            
+
             // Set initial positions for launch animation
-            for (int i = 0; i < (int)apps.size(); i++) {
+            for (int i = 0; i < (int)apps.size(); i++)
+            {
                 Rectangle rect = GetCellRect(i);
                 apps[i]->animOffset.x = rect.x + rect.width / 2;
                 apps[i]->animOffset.y = rect.y + rect.height / 2;
             }
         }
     }
-    
-    void CheckWindowResize() {
+
+    void CheckWindowResize()
+    {
         int windowWidth = GetScreenWidth();
         int windowHeight = GetScreenHeight();
-        
-        if (windowWidth != lastWindowWidth || windowHeight != lastWindowHeight) {
+
+        if (windowWidth != lastWindowWidth || windowHeight != lastWindowHeight)
+        {
             lastWindowWidth = windowWidth;
             lastWindowHeight = windowHeight;
-            
+
             // Recalculate grid columns
             int newGridCols = CalculateGridColumns(windowWidth);
-            
+
             // If grid columns changed, adjust selected index to stay on same app
-            if (newGridCols != currentGridCols && selectedIndex >= 0) {
+            if (newGridCols != currentGridCols && selectedIndex >= 0)
+            {
                 int row = selectedIndex / currentGridCols;
                 int col = selectedIndex % currentGridCols;
-                
+
                 // Clamp column to new grid
                 col = std::min(col, newGridCols - 1);
                 selectedIndex = row * newGridCols + col;
-                
+
                 // Ensure selected index is valid
                 selectedIndex = std::min(selectedIndex, (int)apps.size() - 1);
             }
-            
+
             currentGridCols = newGridCols;
             UpdateMaxScroll();
-            
+
             // Ensure scroll is within bounds
             targetScrollY = std::clamp(targetScrollY, 0.0f, maxScrollY);
         }
     }
-    
+
 public:
     AppLauncher() : selectedIndex(0), hoveredIndex(-1), scrollY(0), targetScrollY(0), maxScrollY(0),
                     currentGridCols(CalculateGridColumns(INITIAL_WINDOW_WIDTH)),
                     lastWindowWidth(INITIAL_WINDOW_WIDTH), lastWindowHeight(INITIAL_WINDOW_HEIGHT),
-                    animState(ANIM_FADE_IN), animTimer(0.0f), fadeAlpha(1.0f), 
-                    launchingAppIndex(-1) {
+                    animState(ANIM_FADE_IN), animTimer(0.0f), fadeAlpha(1.0f),
+                    launchingAppIndex(-1)
+    {
         font = LoadFontEx("assets/fonts/Inter-Regular.ttf", 20, nullptr, 0);
-        if (!font.texture.id) {
+        if (!font.texture.id)
+        {
             font = GetFontDefault();
         }
     }
-    
-    ~AppLauncher() {
-        if (font.texture.id != GetFontDefault().texture.id) {
+
+    ~AppLauncher()
+    {
+        if (font.texture.id != GetFontDefault().texture.id)
+        {
             UnloadFont(font);
         }
     }
-    
-    void LoadApplications() {
+
+    void LoadApplications()
+    {
         apps.clear();
-        
+
         // Load from standard directories
         LoadApplicationsFromDirectory("/usr/share/applications");
         LoadApplicationsFromDirectory("/usr/local/share/applications");
-        
+
         // Load from user directory
         std::string home = getenv("HOME") ? getenv("HOME") : "";
-        if (!home.empty()) {
+        if (!home.empty())
+        {
             LoadApplicationsFromDirectory(home + "/.local/share/applications");
         }
-        
+
         SortApplications();
         LoadIcons();
         InitializeAnimations();
         UpdateMaxScroll();
     }
-    
-    void HandleInput() {
+
+    void HandleInput()
+    {
         // Don't handle input during animations
-        if (animState == ANIM_LAUNCHING) return;
-        
+        if (animState == ANIM_LAUNCHING)
+            return;
+
         hoveredIndex = -1;
-        
+
         // Check for window resize
         CheckWindowResize();
-        
+
         // Mouse input
         Vector2 mousePos = GetMousePosition();
-        for (int i = 0; i < (int)apps.size(); i++) {
+        for (int i = 0; i < (int)apps.size(); i++)
+        {
             Rectangle cellRect = GetCellRect(i);
-            if (CheckCollisionPointRec(mousePos, cellRect)) {
+            if (CheckCollisionPointRec(mousePos, cellRect))
+            {
                 hoveredIndex = i;
-                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+                {
                     LaunchApp(i);
+                    PlaySound(fxSelect);
                 }
                 break;
             }
         }
-        
+
         // Keyboard navigation
         int cols = currentGridCols;
-        if (IsKeyPressed(KEY_RIGHT) && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1) {
+        if (IsKeyPressed(KEY_RIGHT) && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1)
+        {
             selectedIndex++;
             PlaySound(fxMove);
         }
-        if (IsKeyPressed(KEY_LEFT) && selectedIndex % cols > 0) {
+        if (IsKeyPressed(KEY_LEFT) && selectedIndex % cols > 0)
+        {
             selectedIndex--;
             PlaySound(fxMove);
         }
-        if (IsKeyPressed(KEY_DOWN) && selectedIndex + cols < (int)apps.size()) {
+        if (IsKeyPressed(KEY_DOWN) && selectedIndex + cols < (int)apps.size())
+        {
             selectedIndex += cols;
             PlaySound(fxMove);
         }
-        if (IsKeyPressed(KEY_UP) && selectedIndex - cols >= 0) {
+        if (IsKeyPressed(KEY_UP) && selectedIndex - cols >= 0)
+        {
             selectedIndex -= cols;
             PlaySound(fxMove);
         }
-        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) {
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE))
+        {
             LaunchApp(selectedIndex);
             PlaySound(fxSelect);
         }
-        
+
         // Gamepad navigation
-        if (IsGamepadAvailable(0)) {
+        if (IsGamepadAvailable(0))
+        {
             float axisX = GetGamepadAxisMovement(0, GAMEPAD_AXIS_LEFT_X);
             float axisY = GetGamepadAxisMovement(0, GAMEPAD_AXIS_LEFT_Y);
-            
+
             static float gamepadCooldown = 0;
             gamepadCooldown -= GetFrameTime();
-            
-            if (gamepadCooldown <= 0) {
-                if (axisX > GAMEPAD_DEADZONE && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1) {
+
+            if (gamepadCooldown <= 0)
+            {
+                if (axisX > GAMEPAD_DEADZONE && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1)
+                {
                     selectedIndex++;
                     gamepadCooldown = 0.2f;
                 }
-                if (axisX < -GAMEPAD_DEADZONE && selectedIndex % cols > 0) {
+                if (axisX < -GAMEPAD_DEADZONE && selectedIndex % cols > 0)
+                {
                     selectedIndex--;
                     gamepadCooldown = 0.2f;
                 }
-                if (axisY > GAMEPAD_DEADZONE && selectedIndex + cols < (int)apps.size()) {
+                if (axisY > GAMEPAD_DEADZONE && selectedIndex + cols < (int)apps.size())
+                {
                     selectedIndex += cols;
                     gamepadCooldown = 0.2f;
                 }
-                if (axisY < -GAMEPAD_DEADZONE && selectedIndex - cols >= 0) {
+                if (axisY < -GAMEPAD_DEADZONE && selectedIndex - cols >= 0)
+                {
                     selectedIndex -= cols;
                     gamepadCooldown = 0.2f;
                 }
             }
-            
-            if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_DOWN)) {
+
+            if (IsGamepadButtonPressed(0, GAMEPAD_BUTTON_RIGHT_FACE_DOWN))
+            {
                 LaunchApp(selectedIndex);
             }
         }
-        
+
         // Scroll handling
         float wheel = GetMouseWheelMove();
-        if (wheel != 0) {
+        if (wheel != 0)
+        {
             targetScrollY -= wheel * SCROLL_SPEED * 5;
         }
-        
+
         // Ensure selected item is visible
         Rectangle selectedRect = GetCellRect(selectedIndex);
         int windowHeight = GetScreenHeight();
-        if (selectedRect.y < 50) {
+        if (selectedRect.y < 50)
+        {
             targetScrollY -= (50 - selectedRect.y);
-        } else if (selectedRect.y + CELL_HEIGHT > windowHeight - 50) {
+        }
+        else if (selectedRect.y + CELL_HEIGHT > windowHeight - 50)
+        {
             targetScrollY += (selectedRect.y + CELL_HEIGHT - windowHeight + 50);
         }
-        
+
         // Clamp scroll
         targetScrollY = std::clamp(targetScrollY, 0.0f, maxScrollY);
-        
+
         // Smooth scroll
         scrollY += (targetScrollY - scrollY) * SMOOTH_SCROLL_FACTOR;
-        
+
         // Update animations
-        for (int i = 0; i < (int)apps.size(); i++) {
-            if (i == selectedIndex || i == hoveredIndex) {
+        for (int i = 0; i < (int)apps.size(); i++)
+        {
+            if (i == selectedIndex || i == hoveredIndex)
+            {
                 apps[i]->targetScale = SELECTION_SCALE;
-            } else {
+            }
+            else
+            {
                 apps[i]->targetScale = 1.0f;
             }
             apps[i]->UpdateAnimation();
         }
     }
-    
-    void UpdateAnimations() {
+
+    void UpdateAnimations()
+    {
         float deltaTime = GetFrameTime();
         animTimer += deltaTime;
-        
-        switch (animState) {
-            case ANIM_FADE_IN:
-                // Update fade alpha
-                fadeAlpha = 1.0f - (animTimer / FADE_IN_DURATION);
-                if (fadeAlpha < 0) fadeAlpha = 0;
-                
-                // Update app animations
-                for (auto& app : apps) {
-                    if (animTimer > app->animDelay) {
-                        app->UpdateFadeInAnimation(deltaTime);
-                    }
-                }
-                
-                // Check if fade in is complete
-                if (animTimer > FADE_IN_DURATION + apps.size() * TILE_STAGGER_DELAY + TILE_ANIMATION_DURATION) {
-                    animState = ANIM_NORMAL;
-                    fadeAlpha = 0;
-                }
-                break;
-                
-            case ANIM_LAUNCHING:
+
+        switch (animState)
+        {
+        case ANIM_FADE_IN:
+            // Update fade alpha
+            fadeAlpha = 1.0f - (animTimer / FADE_IN_DURATION);
+            if (fadeAlpha < 0)
+                fadeAlpha = 0;
+
+            // Update app animations
+            for (auto &app : apps)
+            {
+                if (animTimer > app->animDelay)
                 {
-                    float progress = animTimer / LAUNCH_ANIMATION_DURATION;
-                    if (progress > 1.0f) progress = 1.0f;
-                    
-                    // Calculate center point of launching app
-                    Rectangle launchRect = GetCellRect(launchingAppIndex);
-                    Vector2 centerPoint = {
-                        launchRect.x + launchRect.width / 2,
-                        launchRect.y + launchRect.height / 2
-                    };
-                    
-                    // Update each app's launch animation
-                    for (int i = 0; i < (int)apps.size(); i++) {
-                        apps[i]->UpdateLaunchAnimation(progress, i, apps.size(), centerPoint);
-                    }
-                    
-                    // Fade to black
-                    fadeAlpha = progress;
-                    
-                    // Launch the app when animation is complete
-                    if (progress >= 1.0f && !pendingLaunchCommand.empty()) {
-                        system(pendingLaunchCommand.c_str());
-                        pendingLaunchCommand.clear();
-                    }
-
-                    // Handle restore animation
-                    if (IsWindowFocused()) {
-                        if (!wasFocusedLastFrame) {
-                            animState = ANIM_FADE_IN;
-                            animTimer = 0.0f;
-                            InitializeAnimations();
-                        }
-
-                        wasFocusedLastFrame = true;
-                    } else {
-                        wasFocusedLastFrame = false;
-                    }
+                    app->UpdateFadeInAnimation(deltaTime);
                 }
-                break;
-                
-            case ANIM_NORMAL:
-                // Normal state, no special animations
-                break;
+            }
+
+            // Check if fade in is complete
+            if (animTimer > FADE_IN_DURATION + apps.size() * TILE_STAGGER_DELAY + TILE_ANIMATION_DURATION)
+            {
+                animState = ANIM_NORMAL;
+                fadeAlpha = 0;
+            }
+            break;
+
+        case ANIM_LAUNCHING:
+        {
+            float progress = animTimer / LAUNCH_ANIMATION_DURATION;
+            if (progress > 1.0f)
+                progress = 1.0f;
+
+            // Calculate center point of launching app
+            Rectangle launchRect = GetCellRect(launchingAppIndex);
+            Vector2 centerPoint = {
+                launchRect.x + launchRect.width / 2,
+                launchRect.y + launchRect.height / 2};
+
+            // Update each app's launch animation
+            for (int i = 0; i < (int)apps.size(); i++)
+            {
+                apps[i]->UpdateLaunchAnimation(progress, i, apps.size(), centerPoint);
+            }
+
+            // Fade to black
+            fadeAlpha = progress;
+
+            // Launch the app when animation is complete
+            if (progress >= 1.0f && !pendingLaunchCommand.empty())
+            {
+                system(pendingLaunchCommand.c_str());
+                pendingLaunchCommand.clear();
+            }
+
+            // Handle restore animation
+            if (IsWindowFocused())
+            {
+                if (!wasFocusedLastFrame)
+                {
+                    animState = ANIM_FADE_IN;
+                    animTimer = 0.0f;
+                    InitializeAnimations();
+                }
+
+                wasFocusedLastFrame = true;
+            }
+            else
+            {
+                wasFocusedLastFrame = false;
+            }
+        }
+        break;
+
+        case ANIM_NORMAL:
+            // Normal state, no special animations
+            break;
         }
     }
-    
-    void Draw() {
+
+    void Draw()
+    {
         int windowWidth = GetScreenWidth();
         int windowHeight = GetScreenHeight();
-        
+
         BeginDrawing();
-        ClearBackground(Color{20, 20, 25, 255});
-        
+        ClearBackground(Color{220, 220, 220, 255}); // Light gray background
+
         // Draw gradient background
-        DrawRectangleGradientV(0, 0, windowWidth, windowHeight, 
-            Color{20, 20, 25, 255}, Color{40, 40, 50, 255});
-        
+        DrawRectangleGradientV(0, 0, windowWidth, windowHeight,
+                               Color{220, 220, 220, 255}, Color{200, 200, 200, 255}); // Light gradient
+
         // Draw apps
-        for (int i = 0; i < (int)apps.size(); i++) {
+        for (int i = 0; i < (int)apps.size(); i++)
+        {
             Rectangle cellRect = GetCellRect(i);
-            
+
             // Skip if outside visible area (only in normal state)
-            if (animState == ANIM_NORMAL && (cellRect.y + CELL_HEIGHT < 0 || cellRect.y > windowHeight)) continue;
-            
+            if (animState == ANIM_NORMAL && (cellRect.y + CELL_HEIGHT < 0 || cellRect.y > windowHeight))
+                continue;
+
             float scale = apps[i]->scale;
             float opacity = apps[i]->opacity;
             bool isSelected = (i == selectedIndex || i == hoveredIndex);
-            
+
             // Apply animation offsets
             float drawX = cellRect.x;
             float drawY = cellRect.y;
-            
-            if (animState == ANIM_FADE_IN) {
+
+            if (animState == ANIM_FADE_IN)
+            {
                 drawY += apps[i]->animOffset.y;
-            } else if (animState == ANIM_LAUNCHING) {
+            }
+            else if (animState == ANIM_LAUNCHING)
+            {
                 drawX = apps[i]->animOffset.x - cellRect.width / 2;
                 drawY = apps[i]->animOffset.y - cellRect.height / 2;
             }
-            
+
             // Draw selection highlight
-            if (isSelected && animState == ANIM_NORMAL) {
-                Color highlightColor = {60, 60, 70, (unsigned char)(100 * opacity)};
+            if (isSelected && animState == ANIM_NORMAL)
+            {
+                Color highlightColor = {100, 150, 200, (unsigned char)(100 * opacity)}; // Light blue highlight
                 DrawRectangleRounded(
                     {drawX + 10, drawY + 10, cellRect.width - 20, cellRect.height - 20},
-                    0.1f, 8, highlightColor
-                );
+                    0.1f, 8, highlightColor);
             }
-            
+
             // Draw icon with scaling
             float iconX = drawX + cellRect.width / 2;
             float iconY = drawY + CELL_HEIGHT / 2 - 20;
             float scaledSize = ICON_SIZE * scale;
-            
-            if (apps[i]->hasTexture) {
+
+            if (apps[i]->hasTexture)
+            {
                 Color tint = {255, 255, 255, (unsigned char)(255 * opacity)};
                 DrawTexturePro(
                     apps[i]->texture,
                     {0, 0, (float)apps[i]->texture.width, (float)apps[i]->texture.height},
-                    {iconX - scaledSize/2, iconY - scaledSize/2, scaledSize, scaledSize},
-                    {0, 0}, 0, tint
-                );
+                    {iconX - scaledSize / 2, iconY - scaledSize / 2, scaledSize, scaledSize},
+                    {0, 0}, 0, tint);
             }
-            
+
             // Draw app name
             Vector2 textSize = MeasureTextEx(font, apps[i]->name.c_str(), 18, 1);
             float textX = drawX + cellRect.width / 2 - textSize.x / 2;
-            float textY = iconY + scaledSize/2 + 10;
-            
+            float textY = iconY + scaledSize / 2 + 10;
+
             // Draw text shadow
-            Color shadowColor = {0, 0, 0, (unsigned char)(180 * opacity)};
-            Color textColor = {255, 255, 255, (unsigned char)(255 * opacity)};
+            Color shadowColor = {50, 50, 50, (unsigned char)(180 * opacity)}; // Darker shadow
+            Color textColor = {0, 0, 0, (unsigned char)(255 * opacity)};      // Black text
             DrawTextEx(font, apps[i]->name.c_str(), {textX + 1, textY + 1}, 18, 1, shadowColor);
             DrawTextEx(font, apps[i]->name.c_str(), {textX, textY}, 18, 1, textColor);
         }
-        
+
         // Draw UI elements only in normal state
-        if (animState != ANIM_LAUNCHING) {
+        if (animState != ANIM_LAUNCHING)
+        {
             // Draw top gradient fade
-            DrawRectangleGradientV(0, 0, windowWidth, 50, 
-                Color{20, 20, 25, 255}, Color{20, 20, 25, 0});
-            
+            DrawRectangleGradientV(0, 0, windowWidth, 50,
+                                   Color{220, 220, 220, 255}, Color{220, 220, 220, 0}); // Match light background
+
             // Draw bottom gradient fade
-            DrawRectangleGradientV(0, windowHeight - 50, windowWidth, 50, 
-                Color{20, 20, 25, 0}, Color{20, 20, 25, 255});
-            
+            DrawRectangleGradientV(0, windowHeight - 50, windowWidth, 50,
+                                   Color{220, 220, 220, 0}, Color{220, 220, 220, 255}); // Match light background
+
             // Draw title
-            DrawTextEx(font, "Applications", {20, 15}, 28, 1, WHITE);
-            
-            // Draw grid info in corner
+            DrawTextEx(fontBold, "Dendy", {20, 15}, 72, 1, Color{0, 0, 0, 255}); // Black title
+
+            // Draw grid info in corner (uncomment if desired)
             /*
             char info[64];
-            snprintf(info, sizeof(info), "Grid: %dx%d", currentGridCols, 
-                     ((int)apps.size() + currentGridCols - 1) / currentGridCols);
-            DrawTextEx(font, info, {windowWidth - 150, 20}, 14, 1, Color{150, 150, 150, 150});
+            snprintf(info, sizeof(info), "Grid: %dx%d", currentGridCols,
+                    ((int)apps.size() + currentGridCols - 1) / currentGridCols);
+            DrawTextEx(font, info, {windowWidth - 150, 20}, 14, 1, Color{50, 50, 50, 150}); // Darker gray
             */
-            
+
             // Draw scroll indicator if needed
-            if (maxScrollY > 0) {
+            if (maxScrollY > 0)
+            {
                 float scrollPercent = scrollY / maxScrollY;
                 float barHeight = 200;
                 float indicatorHeight = 40;
                 float indicatorY = 100 + scrollPercent * (barHeight - indicatorHeight);
-                
-                DrawRectangle(windowWidth - 10, 100, 4, barHeight, Color{100, 100, 100, 100});
-                DrawRectangle(windowWidth - 10, indicatorY, 4, indicatorHeight, Color{200, 200, 200, 200});
+
+                DrawRectangle(windowWidth - 10, 100, 4, barHeight, Color{150, 150, 150, 100});           // Darker scroll bar
+                DrawRectangle(windowWidth - 10, indicatorY, 4, indicatorHeight, Color{50, 50, 50, 200}); // Darker indicator
             }
         }
-        
+
         // Draw fade overlay
-        if (fadeAlpha > 0) {
-            DrawRectangle(0, 0, windowWidth, windowHeight, 
-                Color{0, 0, 0, (unsigned char)(255 * fadeAlpha)});
+        if (fadeAlpha > 0)
+        {
+            DrawRectangle(0, 0, windowWidth, windowHeight,
+                          Color{0, 0, 0, (unsigned char)(255 * fadeAlpha)});
         }
-        
+
         EndDrawing();
     }
-    
-    void Run() {
+
+    void Run()
+    {
         LoadApplications();
-        
-        while (!WindowShouldClose()) {
+
+        while (!WindowShouldClose())
+        {
             UpdateAnimations();
             HandleInput();
             Draw();
@@ -783,22 +921,23 @@ public:
     }
 };
 
-int main() {
+int main()
+{
     // Initialize window
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
-    InitWindow(INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT, "Application Launcher");
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
+    InitWindow(INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT, "Dendy Launcher");
     InitAudioDevice();
     SetTargetFPS(60);
-    
+
     Sound fxLogin = LoadSound("/etc/dendy/assets/login.wav");
     PlaySound(fxLogin);
 
     // Create and run launcher
     AppLauncher launcher;
     launcher.Run();
-    
+
     // Cleanup
     CloseWindow();
-    
+
     return 0;
 }

@@ -19,6 +19,13 @@ cd src
         echo ""
     cd ..
 
+    echo "🏢: Emulator"
+    cd dendy_emulator
+        make -j$(nproc)
+        mv dendy_emulator ../../dendy/etc/dendy/dendy_emulator
+        echo ""
+    cd ..
+
 cd ..
 
 sudo chmod 0775 dendy/DEBIAN/*
