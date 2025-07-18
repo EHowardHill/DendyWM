@@ -1,4 +1,4 @@
-// app_launcher.cpp - Apple TV style application launcher for Linux with animations
+// dendy_launcher.cpp
 
 #include "include/raylib.h"
 #include <iostream>
@@ -21,6 +21,9 @@ constexpr int MIN_GRID_COLS = 3;
 constexpr int MAX_GRID_COLS = 8;
 constexpr int ICON_SIZE = 196;
 constexpr int ICON_PADDING = 64;
+constexpr int TOP_MARGIN = 128;
+constexpr int BOTTOM_MARGIN = 100;
+constexpr int SCROLL_PADDING = 50;
 constexpr int TEXT_HEIGHT = 32;
 constexpr int CELL_WIDTH = 300;
 constexpr int CELL_HEIGHT = 300;
@@ -273,39 +276,115 @@ class IconLoader
 private:
     static std::vector<std::string> GetIconSearchPaths()
     {
-        return {
+        std::vector<std::string> paths = {
             "/usr/share/icons/hicolor",
             "/usr/share/icons/gnome",
             "/usr/share/icons/Adwaita",
             "/usr/share/pixmaps"};
+
+        // Add Waydroid-specific paths
+        std::string home = getenv("HOME") ? getenv("HOME") : "";
+        if (!home.empty())
+        {
+            // Waydroid typically stores icons in these locations
+            paths.push_back(home + "/.local/share/icons/hicolor");
+            paths.push_back(home + "/.local/share/icons");
+            paths.push_back(home + "/.local/share/pixmaps");
+            paths.push_back(home + "/.local/share/waydroid-extra/icons");
+
+            // Check for Waydroid data directory
+            std::string waydroidData = home + "/.local/share/waydroid/data";
+            if (fs::exists(waydroidData))
+            {
+                paths.push_back(waydroidData + "/icons");
+            }
+        }
+
+        // Also check system-wide Waydroid locations
+        paths.push_back("/var/lib/waydroid/images/icons");
+        paths.push_back("/usr/share/waydroid-extra/icons");
+
+        return paths;
     }
 
     static std::vector<std::string> GetIconSizes()
     {
-        return {"128x128", "256x256", "scalable", "64x64", "48x48"};
+        // Add more sizes that Android apps might use
+        return {"128x128", "256x256", "192x192", "144x144", "96x96", "72x72", "scalable", "64x64", "48x48"};
+    }
+
+    // Helper function to check if this is a Waydroid app
+    static bool IsWaydroidApp(const std::string &iconName)
+    {
+        return iconName.find("waydroid") != std::string::npos ||
+               iconName.find("android") != std::string::npos ||
+               iconName.find("org.") == 0 || // Android package names often start with org.
+               iconName.find("com.") == 0;   // or com.
     }
 
 public:
     static std::string FindIcon(const std::string &iconName)
     {
+        // Debug output
+        std::cout << "Looking for icon: " << iconName << std::endl;
+
         // If it's already a full path
-        if (hasEnding(iconName, "/") && fs::exists(iconName))
+        if (iconName[0] == '/' && fs::exists(iconName))
         {
+            std::cout << "Found icon at full path: " << iconName << std::endl;
             return iconName;
         }
 
-        std::vector<std::string> extensions = {".png", ".svg", ".xpm", ""};
+        // If it's a relative path starting with ~
+        if (iconName[0] == '~')
+        {
+            std::string home = getenv("HOME") ? getenv("HOME") : "";
+            if (!home.empty())
+            {
+                std::string expandedPath = home + iconName.substr(1);
+                if (fs::exists(expandedPath))
+                {
+                    std::cout << "Found icon at expanded path: " << expandedPath << std::endl;
+                    return expandedPath;
+                }
+            }
+        }
+
+        std::vector<std::string> extensions = {".png", ".jpg", ".jpeg", ".svg", ".xpm", ""};
+        bool isWaydroid = IsWaydroidApp(iconName);
 
         for (const auto &basePath : GetIconSearchPaths())
         {
+            // Skip if path doesn't exist
+            if (!fs::exists(basePath))
+                continue;
+
             // Direct pixmaps search
-            if (hasEnding(basePath, "pixmaps"))
+            if (basePath.find("pixmaps") != std::string::npos)
             {
                 for (const auto &ext : extensions)
                 {
                     std::string path = basePath + "/" + iconName + ext;
                     if (fs::exists(path))
+                    {
+                        std::cout << "Found icon at: " << path << std::endl;
                         return path;
+                    }
+                }
+
+                // For Waydroid apps, also try without the full package name
+                if (isWaydroid && iconName.find('.') != std::string::npos)
+                {
+                    std::string shortName = iconName.substr(iconName.rfind('.') + 1);
+                    for (const auto &ext : extensions)
+                    {
+                        std::string path = basePath + "/" + shortName + ext;
+                        if (fs::exists(path))
+                        {
+                            std::cout << "Found icon with short name at: " << path << std::endl;
+                            return path;
+                        }
+                    }
                 }
                 continue;
             }
@@ -313,59 +392,103 @@ public:
             // Themed icon search
             for (const auto &size : GetIconSizes())
             {
-                for (const auto &ext : extensions)
+                // Try multiple subdirectories
+                std::vector<std::string> subdirs = {"apps", "applications", ""};
+
+                for (const auto &subdir : subdirs)
                 {
-                    std::string path = basePath + "/" + size + "/apps/" + iconName + ext;
-                    if (fs::exists(path))
-                        return path;
+                    std::string dirPath = basePath + "/" + size;
+                    if (!subdir.empty())
+                    {
+                        dirPath += "/" + subdir;
+                    }
+
+                    for (const auto &ext : extensions)
+                    {
+                        std::string path = dirPath + "/" + iconName + ext;
+                        if (fs::exists(path))
+                        {
+                            std::cout << "Found icon at: " << path << std::endl;
+                            return path;
+                        }
+                    }
                 }
             }
         }
 
+        // Special handling for Waydroid apps - try to find Android APK icons
+        if (isWaydroid)
+        {
+            std::string home = getenv("HOME") ? getenv("HOME") : "";
+            if (!home.empty())
+            {
+                // Check Waydroid overlay directory
+                std::string overlayPath = home + "/.local/share/waydroid/overlay";
+                if (fs::exists(overlayPath))
+                {
+                    // This would need more complex logic to extract from APKs
+                    std::cout << "Could check Waydroid overlay at: " << overlayPath << std::endl;
+                }
+            }
+        }
+
+        std::cout << "Icon not found for: " << iconName << std::endl;
         return "";
     }
 
-    static Texture2D LoadIconTexture(const std::string &iconPath)
+    // Returns true if icon was loaded successfully, false otherwise
+    static bool TryLoadIconTexture(const std::string &iconPath, Texture2D &tex)
     {
-        Texture2D tex = {0};
-
         if (iconPath.empty())
         {
-            // Create default icon
-            Image img = GenImageColor(ICON_SIZE, ICON_SIZE, LIGHTGRAY);
-            tex = LoadTextureFromImage(img);
-            UnloadImage(img);
-            return tex;
+            return false; // No icon path, skip this app
         }
 
         // Load image based on extension
         if (hasEnding(iconPath, ".svg"))
         {
-            // For SVG, we'd need a library like librsvg, so use default for now
-            Image img = GenImageColor(ICON_SIZE, ICON_SIZE, LIGHTGRAY);
-            tex = LoadTextureFromImage(img);
-            UnloadImage(img);
+            // SVG files not supported without additional library
+            return false;
         }
         else
         {
             Image img = LoadImage(iconPath.c_str());
             if (img.data)
             {
-                // Resize to standard icon size
-                ImageResize(&img, ICON_SIZE, ICON_SIZE);
+                // Resize to standard icon size while maintaining aspect ratio
+                float scale = std::min((float)ICON_SIZE / img.width, (float)ICON_SIZE / img.height);
+                int newWidth = img.width * scale;
+                int newHeight = img.height * scale;
+
+                ImageResize(&img, newWidth, newHeight);
+
+                // Create a new image with padding if needed
+                if (newWidth < ICON_SIZE || newHeight < ICON_SIZE)
+                {
+                    Image paddedImg = GenImageColor(ICON_SIZE, ICON_SIZE, BLANK);
+                    int offsetX = (ICON_SIZE - newWidth) / 2;
+                    int offsetY = (ICON_SIZE - newHeight) / 2;
+                    ImageDraw(&paddedImg, img,
+                              (Rectangle){0, 0, (float)newWidth, (float)newHeight},
+                              (Rectangle){(float)offsetX, (float)offsetY, (float)newWidth, (float)newHeight},
+                              WHITE);
+                    UnloadImage(img);
+                    img = paddedImg;
+                }
+
                 tex = LoadTextureFromImage(img);
                 UnloadImage(img);
+
+                // Set texture filtering for better quality
+                SetTextureFilter(tex, TEXTURE_FILTER_BILINEAR);
+
+                return true; // Successfully loaded
             }
             else
             {
-                // Fallback to default
-                img = GenImageColor(ICON_SIZE, ICON_SIZE, LIGHTGRAY);
-                tex = LoadTextureFromImage(img);
-                UnloadImage(img);
+                return false; // Failed to load image
             }
         }
-
-        return tex;
     }
 };
 
@@ -386,6 +509,7 @@ private:
     Sound fxMove = LoadSound("/etc/dendy/assets/move.wav");
     Sound fxSelect = LoadSound("/etc/dendy/assets/select.wav");
     Font fontBold = LoadFontEx("/etc/dendy/assets/fonts/Bogart-Black-trial.ttf", 96, 0, 250);
+    Texture2D logoTexture;
 
     // Animation state
     AnimationState animState;
@@ -427,12 +551,38 @@ private:
 
     void LoadIcons()
     {
-        for (auto &app : apps)
-        {
-            std::string iconPath = IconLoader::FindIcon(app->icon);
-            app->texture = IconLoader::LoadIconTexture(iconPath);
-            app->hasTexture = true;
-        }
+        std::cout << "Loading icons for " << apps.size() << " applications..." << std::endl;
+
+        // Use erase-remove idiom to filter out apps without valid icons
+        apps.erase(
+            std::remove_if(apps.begin(), apps.end(),
+                           [](std::unique_ptr<AppEntry> &app)
+                           {
+                               std::string iconPath = IconLoader::FindIcon(app->icon);
+
+                               if (iconPath.empty())
+                               {
+                                   std::cout << "No icon found for: " << app->name << " (icon: " << app->icon << ")" << std::endl;
+                                   return true; // Remove this app
+                               }
+
+                               // Try to load the texture
+                               bool success = IconLoader::TryLoadIconTexture(iconPath, app->texture);
+                               if (success)
+                               {
+                                   app->hasTexture = true;
+                                   std::cout << "Successfully loaded icon for: " << app->name << std::endl;
+                                   return false; // Keep this app
+                               }
+                               else
+                               {
+                                   std::cout << "Failed to load icon texture for: " << app->name << " (path: " << iconPath << ")" << std::endl;
+                                   return true; // Remove this app
+                               }
+                           }),
+            apps.end());
+
+        std::cout << "After filtering, " << apps.size() << " applications have valid icons" << std::endl;
     }
 
     void InitializeAnimations()
@@ -456,7 +606,8 @@ private:
     {
         int windowHeight = GetScreenHeight();
         int rows = ((int)apps.size() + currentGridCols - 1) / currentGridCols;
-        maxScrollY = std::max(0.0f, (float)(rows * CELL_HEIGHT - windowHeight + 100));
+        float contentHeight = rows * CELL_HEIGHT + TOP_MARGIN + BOTTOM_MARGIN;
+        maxScrollY = std::max(0.0f, contentHeight - windowHeight);
     }
 
     Rectangle GetCellRect(int index) const
@@ -467,7 +618,7 @@ private:
 
         float gridWidth = currentGridCols * CELL_WIDTH;
         float x = (windowWidth - gridWidth) / 2 + col * CELL_WIDTH;
-        float y = row * CELL_HEIGHT - scrollY + 100;
+        float y = row * CELL_HEIGHT - scrollY + TOP_MARGIN; // Use TOP_MARGIN constant
 
         return {x, y, (float)CELL_WIDTH, (float)CELL_HEIGHT};
     }
@@ -539,6 +690,14 @@ public:
         {
             font = GetFontDefault();
         }
+
+        // Load logo
+        Image logoImage = LoadImage("/etc/dendy/assets/logo-smallest.png");
+        if (logoImage.data)
+        {
+            logoTexture = LoadTextureFromImage(logoImage);
+            UnloadImage(logoImage);
+        }
     }
 
     ~AppLauncher()
@@ -565,15 +724,25 @@ public:
         }
 
         SortApplications();
-        LoadIcons();
+        LoadIcons(); // This now filters out apps without icons
         InitializeAnimations();
         UpdateMaxScroll();
+
+        // Reset selected index if no apps remain
+        if (apps.empty())
+        {
+            selectedIndex = -1;
+        }
+        else if (selectedIndex >= (int)apps.size())
+        {
+            selectedIndex = 0;
+        }
     }
 
     void HandleInput()
     {
-        // Don't handle input during animations
-        if (animState == ANIM_LAUNCHING)
+        // Don't handle input during animations or if no apps
+        if (animState == ANIM_LAUNCHING || apps.empty())
             return;
 
         hoveredIndex = -1;
@@ -675,13 +844,13 @@ public:
         // Ensure selected item is visible
         Rectangle selectedRect = GetCellRect(selectedIndex);
         int windowHeight = GetScreenHeight();
-        if (selectedRect.y < 50)
+        if (selectedRect.y < SCROLL_PADDING)
         {
-            targetScrollY -= (50 - selectedRect.y);
+            targetScrollY -= (SCROLL_PADDING - selectedRect.y);
         }
-        else if (selectedRect.y + CELL_HEIGHT > windowHeight - 50)
+        else if (selectedRect.y + CELL_HEIGHT > windowHeight - SCROLL_PADDING)
         {
-            targetScrollY += (selectedRect.y + CELL_HEIGHT - windowHeight + 50);
+            targetScrollY += (selectedRect.y + CELL_HEIGHT - windowHeight + SCROLL_PADDING);
         }
 
         // Clamp scroll
@@ -800,82 +969,96 @@ public:
         DrawRectangleGradientV(0, 0, windowWidth, windowHeight,
                                Color{220, 220, 220, 255}, Color{200, 200, 200, 255}); // Light gradient
 
-        // Draw apps
-        for (int i = 0; i < (int)apps.size(); i++)
+        // Draw message if no apps
+        if (apps.empty())
         {
-            Rectangle cellRect = GetCellRect(i);
-
-            // Skip if outside visible area (only in normal state)
-            if (animState == ANIM_NORMAL && (cellRect.y + CELL_HEIGHT < 0 || cellRect.y > windowHeight))
-                continue;
-
-            float scale = apps[i]->scale;
-            float opacity = apps[i]->opacity;
-            bool isSelected = (i == selectedIndex || i == hoveredIndex);
-
-            // Apply animation offsets
-            float drawX = cellRect.x;
-            float drawY = cellRect.y;
-
-            if (animState == ANIM_FADE_IN)
+            const char *message = "No applications with valid icons found";
+            Vector2 textSize = MeasureTextEx(font, message, 24, 1);
+            DrawTextEx(font, message,
+                       {windowWidth / 2.0f - textSize.x / 2, windowHeight / 2.0f - textSize.y / 2},
+                       24, 1, Color{100, 100, 100, 255});
+        }
+        else
+        {
+            // Draw apps
+            for (int i = 0; i < (int)apps.size(); i++)
             {
-                drawY += apps[i]->animOffset.y;
+                Rectangle cellRect = GetCellRect(i);
+
+                // Skip if outside visible area (only in normal state)
+                if (animState == ANIM_NORMAL && (cellRect.y + CELL_HEIGHT < 0 || cellRect.y > windowHeight))
+                    continue;
+
+                float scale = apps[i]->scale;
+                float opacity = apps[i]->opacity;
+                bool isSelected = (i == selectedIndex || i == hoveredIndex);
+
+                // Apply animation offsets
+                float drawX = cellRect.x;
+                float drawY = cellRect.y;
+
+                if (animState == ANIM_FADE_IN)
+                {
+                    drawY += apps[i]->animOffset.y;
+                }
+                else if (animState == ANIM_LAUNCHING)
+                {
+                    drawX = apps[i]->animOffset.x - cellRect.width / 2;
+                    drawY = apps[i]->animOffset.y - cellRect.height / 2;
+                }
+
+                // Draw selection highlight
+                if (isSelected && animState == ANIM_NORMAL)
+                {
+                    Color highlightColor = {100, 150, 200, (unsigned char)(100 * opacity)}; // Light blue highlight
+                    DrawRectangleRounded(
+                        {drawX + 10, drawY + 10, cellRect.width - 20, cellRect.height - 20},
+                        0.1f, 8, highlightColor);
+                }
+
+                // Draw icon with scaling
+                float iconX = drawX + cellRect.width / 2;
+                float iconY = drawY + CELL_HEIGHT / 2 - 20;
+                float scaledSize = ICON_SIZE * scale;
+
+                if (apps[i]->hasTexture)
+                {
+                    Color tint = {255, 255, 255, (unsigned char)(255 * opacity)};
+                    DrawTexturePro(
+                        apps[i]->texture,
+                        {0, 0, (float)apps[i]->texture.width, (float)apps[i]->texture.height},
+                        {iconX - scaledSize / 2, iconY - scaledSize / 2, scaledSize, scaledSize},
+                        {0, 0}, 0, tint);
+                }
+
+                // Draw app name
+                Vector2 textSize = MeasureTextEx(font, apps[i]->name.c_str(), 18, 1);
+                float textX = drawX + cellRect.width / 2 - textSize.x / 2;
+                float textY = iconY + scaledSize / 2 + 10;
+
+                // Draw text shadow
+                Color shadowColor = {50, 50, 50, (unsigned char)(180 * opacity)}; // Darker shadow
+                Color textColor = {0, 0, 0, (unsigned char)(255 * opacity)};      // Black text
+                DrawTextEx(font, apps[i]->name.c_str(), {textX + 1, textY + 1}, 18, 1, shadowColor);
+                DrawTextEx(font, apps[i]->name.c_str(), {textX, textY}, 18, 1, textColor);
             }
-            else if (animState == ANIM_LAUNCHING)
-            {
-                drawX = apps[i]->animOffset.x - cellRect.width / 2;
-                drawY = apps[i]->animOffset.y - cellRect.height / 2;
-            }
-
-            // Draw selection highlight
-            if (isSelected && animState == ANIM_NORMAL)
-            {
-                Color highlightColor = {100, 150, 200, (unsigned char)(100 * opacity)}; // Light blue highlight
-                DrawRectangleRounded(
-                    {drawX + 10, drawY + 10, cellRect.width - 20, cellRect.height - 20},
-                    0.1f, 8, highlightColor);
-            }
-
-            // Draw icon with scaling
-            float iconX = drawX + cellRect.width / 2;
-            float iconY = drawY + CELL_HEIGHT / 2 - 20;
-            float scaledSize = ICON_SIZE * scale;
-
-            if (apps[i]->hasTexture)
-            {
-                Color tint = {255, 255, 255, (unsigned char)(255 * opacity)};
-                DrawTexturePro(
-                    apps[i]->texture,
-                    {0, 0, (float)apps[i]->texture.width, (float)apps[i]->texture.height},
-                    {iconX - scaledSize / 2, iconY - scaledSize / 2, scaledSize, scaledSize},
-                    {0, 0}, 0, tint);
-            }
-
-            // Draw app name
-            Vector2 textSize = MeasureTextEx(font, apps[i]->name.c_str(), 18, 1);
-            float textX = drawX + cellRect.width / 2 - textSize.x / 2;
-            float textY = iconY + scaledSize / 2 + 10;
-
-            // Draw text shadow
-            Color shadowColor = {50, 50, 50, (unsigned char)(180 * opacity)}; // Darker shadow
-            Color textColor = {0, 0, 0, (unsigned char)(255 * opacity)};      // Black text
-            DrawTextEx(font, apps[i]->name.c_str(), {textX + 1, textY + 1}, 18, 1, shadowColor);
-            DrawTextEx(font, apps[i]->name.c_str(), {textX, textY}, 18, 1, textColor);
         }
 
-        // Draw UI elements only in normal state
+        // Draw UI elements only when not launching an app
         if (animState != ANIM_LAUNCHING)
         {
-            // Draw top gradient fade
-            DrawRectangleGradientV(0, 0, windowWidth, 50,
-                                   Color{220, 220, 220, 255}, Color{220, 220, 220, 0}); // Match light background
+            DrawRectangleGradientV(0, 0, windowWidth, SCROLL_PADDING,
+                                   Color{220, 220, 220, 255}, Color{220, 220, 220, 0});
 
             // Draw bottom gradient fade
-            DrawRectangleGradientV(0, windowHeight - 50, windowWidth, 50,
-                                   Color{220, 220, 220, 0}, Color{220, 220, 220, 255}); // Match light background
+            DrawRectangleGradientV(0, windowHeight - SCROLL_PADDING, windowWidth, SCROLL_PADDING,
+                                   Color{220, 220, 220, 0}, Color{220, 220, 220, 255});
 
             // Draw title
-            DrawTextEx(fontBold, "Dendy", {20, 15}, 72, 1, Color{0, 0, 0, 255}); // Black title
+            float logoX = (windowWidth - logoTexture.width) / 2.0f;
+            float logoY = 12;
+
+            DrawTexture(logoTexture, logoX, logoY, WHITE);
 
             // Draw grid info in corner (uncomment if desired)
             /*
@@ -886,7 +1069,7 @@ public:
             */
 
             // Draw scroll indicator if needed
-            if (maxScrollY > 0)
+            if (maxScrollY > 0 && !apps.empty())
             {
                 float scrollPercent = scrollY / maxScrollY;
                 float barHeight = 200;
