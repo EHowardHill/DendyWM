@@ -1,0 +1,74 @@
+{
+    "core_mappings": {
+        ".gba": "mgba_libretro.so",
+        ".gb": "gambatte_libretro.so",
+        ".gbc": "gambatte_libretro.so",
+        ".nes": "nestopia_libretro.so",
+        ".smc": "snes9x_libretro.so",
+        ".sfc": "snes9x_libretro.so",
+        ".md": "genesis_plus_gx_libretro.so",
+        ".gen": "genesis_plus_gx_libretro.so",
+        ".bin": "genesis_plus_gx_libretro.so",
+        ".sms": "genesis_plus_gx_libretro.so",
+        ".cue": "beetle_psx_libretro.so",
+        ".pbp": "beetle_psx_libretro.so",
+        ".n64": "mupen64plus_next_libretro.so",
+        ".z64": "mupen64plus_next_libretro.so",
+        ".v64": "mupen64plus_next_libretro.so",
+        ".zip": "mame_libretro.so",
+        ".a26": "stella_libretro.so",
+        ".ngp": "mednafen_ngp_libretro.so",
+        ".ngc": "mednafen_ngp_libretro.so",
+        ".pce": "mednafen_pce_libretro.so",
+        ".lnx": "handy_libretro.so",
+        ".vb": "mednafen_vb_libretro.so"
+    },
+    "core_directories": [
+        "/usr/lib/x86_64-linux-gnu/libretro/",
+        "/usr/lib/libretro/",
+        "/usr/local/lib/libretro/",
+        "~/.local/lib/libretro/"
+    ],
+    "retroarch_paths": [
+        "/usr/bin/retroarch",
+        "/usr/local/bin/retroarch",
+        "~/.local/bin/retroarch"
+    ],
+    "retroarch_config": {
+        "video_fullscreen": "true",
+        "video_windowed_fullscreen": "false",
+        "fps_show": "false",
+        "notification_show_autoconfig": "false",
+        "notification_show_cheats_applied": "false",
+        "notification_show_config_override_load": "false",
+        "notification_show_fast_forward": "false",
+        "notification_show_patch_applied": "false",
+        "notification_show_refresh_rate": "false",
+        "notification_show_remap_load": "false",
+        "notification_show_save_state": "false",
+        "notification_show_screenshot": "false",
+        "notification_show_set_initial_disk": "false",
+        "notification_show_when_menu_is_alive": "false",
+        "menu_enable_widgets": "false",
+        "menu_widget_scale_auto": "false",
+        "menu_show_load_content_animation": "false",
+        "menu_show_online_updater": "false",
+        "menu_show_core_updater": "false",
+        "video_font_enable": "false",
+        "video_msg_bgcolor_enable": "false",
+        "config_save_on_exit": "false",
+        "game_specific_options": "false",
+        "auto_overrides_enable": "false",
+        "auto_remaps_enable": "false",
+        "auto_shaders_enable": "false",
+        "core_option_category_enable": "false",
+        "menu_driver": "null"
+    },
+    "special_handling": {
+        "bin_files": {
+            "description": "Special handling for .bin files - check for .cue file to determine if PlayStation",
+            "default_core": "genesis_plus_gx_libretro.so",
+            "playstation_core": "beetle_psx_libretro.so"
+        }
+    }
+}
