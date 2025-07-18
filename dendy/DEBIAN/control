@@ -1,6 +1,6 @@
 Package: dendy
-Version: 1.0.2.8
+Version: 1.0.2.18
 Architecture: amd64
 Maintainer: Ethan Hill <ehill.hill199@outlook.com>
-Depends: xserver-xorg-core, xinit, libx11-6, retroarch, waydroid, libretro-mgba, libretro-snes9x, libretro-nestopia, libretro-gambatte, libretro-genesisplusgx
+Depends: cage, xserver-xorg-core, libx11-6, retroarch, python3, waydroid, libretro-mgba, libretro-snes9x, libretro-nestopia, libretro-gambatte, libretro-genesisplusgx
 Description: Dendy System Software

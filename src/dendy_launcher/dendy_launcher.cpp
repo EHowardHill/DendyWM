@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 constexpr int INITIAL_WINDOW_WIDTH = 1920;
 constexpr int INITIAL_WINDOW_HEIGHT = 1080;
 constexpr int MIN_GRID_COLS = 3;
-constexpr int MAX_GRID_COLS = 8;
+constexpr int MAX_GRID_COLS = 5;
 constexpr int ICON_SIZE = 196;
 constexpr int ICON_PADDING = 64;
 constexpr int TOP_MARGIN = 128;
@@ -506,6 +506,7 @@ private:
     int lastWindowWidth;
     int lastWindowHeight;
     bool wasFocusedLastFrame = true;
+    Music music = LoadMusicStream("/etc/dendy/assets/bg01.mp3");
     Sound fxMove = LoadSound("/etc/dendy/assets/move.wav");
     Sound fxSelect = LoadSound("/etc/dendy/assets/select.wav");
     Font fontBold = LoadFontEx("/etc/dendy/assets/fonts/Bogart-Black-trial.ttf", 96, 0, 250);
@@ -625,6 +626,9 @@ private:
 
     void LaunchApp(int index)
     {
+        PauseMusicStream(music);
+        PlaySound(fxSelect);
+
         if (index >= 0 && index < (int)apps.size())
         {
             // Start launch animation
@@ -685,19 +689,22 @@ public:
                     animState(ANIM_FADE_IN), animTimer(0.0f), fadeAlpha(1.0f),
                     launchingAppIndex(-1)
     {
-        font = LoadFontEx("assets/fonts/Inter-Regular.ttf", 20, nullptr, 0);
+        font = LoadFontEx("/etc/dendy/assets/fonts/Bogart-Medium-trial.ttf", 32, nullptr, 0);
         if (!font.texture.id)
         {
             font = GetFontDefault();
         }
 
         // Load logo
-        Image logoImage = LoadImage("/etc/dendy/assets/logo-smallest.png");
+        Image logoImage = LoadImage("/etc/dendy/assets/logo.png");
         if (logoImage.data)
         {
             logoTexture = LoadTextureFromImage(logoImage);
             UnloadImage(logoImage);
         }
+
+        // Start music
+        PlayMusicStream(music);
     }
 
     ~AppLauncher()
@@ -711,6 +718,7 @@ public:
     void LoadApplications()
     {
         apps.clear();
+        ResumeMusicStream(music);
 
         // Load from standard directories
         LoadApplicationsFromDirectory("/usr/share/applications");
@@ -761,7 +769,6 @@ public:
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
                 {
                     LaunchApp(i);
-                    PlaySound(fxSelect);
                 }
                 break;
             }
@@ -792,7 +799,6 @@ public:
         if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE))
         {
             LaunchApp(selectedIndex);
-            PlaySound(fxSelect);
         }
 
         // Gamepad navigation
@@ -1032,15 +1038,15 @@ public:
                 }
 
                 // Draw app name
-                Vector2 textSize = MeasureTextEx(font, apps[i]->name.c_str(), 18, 1);
+                Vector2 textSize = MeasureTextEx(font, apps[i]->name.c_str(), 32, 1);
                 float textX = drawX + cellRect.width / 2 - textSize.x / 2;
                 float textY = iconY + scaledSize / 2 + 10;
 
                 // Draw text shadow
-                Color shadowColor = {50, 50, 50, (unsigned char)(180 * opacity)}; // Darker shadow
+                Color shadowColor = {50, 50, 50, (unsigned char)(32 * opacity)}; // Darker shadow
                 Color textColor = {0, 0, 0, (unsigned char)(255 * opacity)};      // Black text
-                DrawTextEx(font, apps[i]->name.c_str(), {textX + 1, textY + 1}, 18, 1, shadowColor);
-                DrawTextEx(font, apps[i]->name.c_str(), {textX, textY}, 18, 1, textColor);
+                DrawTextEx(font, apps[i]->name.c_str(), {textX + 1, textY + 1}, 32, 1, shadowColor);
+                DrawTextEx(font, apps[i]->name.c_str(), {textX, textY}, 32, 1, textColor);
             }
         }
 
@@ -1097,6 +1103,11 @@ public:
 
         while (!WindowShouldClose())
         {
+            if (music.stream.buffer != nullptr)
+            {
+                UpdateMusicStream(music);
+            }
+
             UpdateAnimations();
             HandleInput();
             Draw();

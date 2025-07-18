@@ -1,0 +1,9 @@
+#!/bin/bash
+cage /etc/dendy/launcher &
+
+# Wait for the Wayland socket to be available
+while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do
+    sleep 1
+done
+
+waydroid session start
