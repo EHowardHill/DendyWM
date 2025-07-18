@@ -1,0 +1,1 @@
+g++ -std=c++17 main.cpp -o dendy_emulator -lSDL2 -lGL -ldl -lstdc++fs
