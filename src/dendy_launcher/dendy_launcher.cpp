@@ -718,7 +718,6 @@ public:
     void LoadApplications()
     {
         apps.clear();
-        ResumeMusicStream(music);
 
         // Load from standard directories
         LoadApplicationsFromDirectory("/usr/share/applications");
@@ -946,6 +945,8 @@ public:
                     animState = ANIM_FADE_IN;
                     animTimer = 0.0f;
                     InitializeAnimations();
+                    StopMusicStream(music);
+                    PlayMusicStream(music);
                 }
 
                 wasFocusedLastFrame = true;
