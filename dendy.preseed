@@ -1,0 +1,151 @@
+# Debian 12 (Bookworm) Preseed Configuration
+# Minimal system with Wayland (cage), audio, RetroArch and Waydroid support
+
+### Localization
+d-i debian-installer/locale string en_US.UTF-8
+d-i keyboard-configuration/xkb-keymap select us
+
+### Network configuration
+d-i netcfg/choose_interface select auto
+d-i netcfg/get_hostname string debian
+d-i netcfg/get_domain string localdomain
+d-i netcfg/wireless_wep string
+
+### Mirror settings
+d-i mirror/country string manual
+d-i mirror/http/hostname string deb.debian.org
+d-i mirror/http/directory string /debian
+d-i mirror/http/proxy string
+
+### Account setup
+d-i passwd/root-login boolean false
+d-i passwd/user-fullname string Dendy User
+d-i passwd/username string dendy
+d-i passwd/user-password password chronos
+d-i passwd/user-password-again password chronos
+d-i user-setup/allow-password-weak boolean true
+d-i user-setup/encrypt-home boolean false
+
+### Clock and time zone setup
+d-i clock-setup/utc boolean true
+d-i time/zone string US/Eastern
+d-i clock-setup/ntp boolean true
+
+### Partitioning
+d-i partman-auto/method string regular
+d-i partman-auto/choose_recipe select atomic
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+
+### Base system installation
+d-i base-installer/kernel/image string linux-image-amd64
+
+### Apt setup
+# Enable main, contrib and non-free components
+d-i apt-setup/non-free boolean true
+d-i apt-setup/contrib boolean true
+d-i apt-setup/non-free-firmware boolean true
+d-i apt-setup/services-select multiselect security, updates
+d-i apt-setup/security_host string security.debian.org
+
+# Additional repositories
+d-i apt-setup/local0/repository string \
+    deb http://gnimble.online/packages bookworm main
+d-i apt-setup/local0/comment string Gnimble repository
+d-i apt-setup/local0/key string http://gnimble.online/packages/gnimble.gpg
+
+### Package selection
+tasksel tasksel/first multiselect standard, ssh-server
+
+# Individual package selection
+d-i pkgsel/include string \
+    build-essential \
+    curl \
+    wget \
+    git \
+    vim \
+    htop \
+    neofetch \
+    \
+    wayland \
+    wayland-protocols \
+    libwayland-client0 \
+    libwayland-server0 \
+    libwayland-cursor0 \
+    libwayland-egl1 \
+    xwayland \
+    weston \
+    cage \
+    libinput10 \
+    libseat1 \
+    \
+    pipewire \
+    pipewire-pulse \
+    pipewire-alsa \
+    pipewire-jack \
+    wireplumber \
+    pavucontrol \
+    alsa-utils \
+    \
+    mesa-vulkan-drivers \
+    libgl1-mesa-dri \
+    libglx-mesa0 \
+    mesa-utils \
+    vulkan-tools \
+    libvulkan1 \
+    \
+    retroarch \
+    libretro-core-info \
+    \
+    lxc \
+    lxc-templates \
+    python3 \
+    python3-pip \
+    python3-gbinder \
+    python3-gi \
+    gir1.2-gtk-3.0 \
+    dnsmasq \
+    iptables \
+    ca-certificates \
+    \
+    libsdl2-2.0-0 \
+    libsdl2-image-2.0-0 \
+    libsdl2-mixer-2.0-0 \
+    libsdl2-ttf-2.0-0 \
+    libsdl2-net-2.0-0 \
+    \
+    ffmpeg \
+    libavcodec59 \
+    libavformat59 \
+    libavutil57 \
+    libswscale6 \
+    \
+    fonts-liberation \
+    fonts-noto \
+    \
+    dendy
+
+# Update packages
+d-i pkgsel/upgrade select full-upgrade
+
+# Popularity contest
+popularity-contest popularity-contest/participate boolean false
+
+### Boot loader installation
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean true
+d-i grub-installer/bootdev string default
+
+### Finishing up the installation
+d-i finish-install/reboot_in_progress note
+
+### Late commands
+d-i preseed/late_command string \
+    in-target systemctl enable ssh; \
+    in-target systemctl enable pipewire-pulse; \
+    in-target usermod -aG video,audio,input,render dendy; \
+    echo "export XDG_RUNTIME_DIR=/run/user/\$(id -u)" >> /target/home/dendy/.bashrc; \
+    echo "export WAYLAND_DISPLAY=wayland-1" >> /target/home/dendy/.bashrc; \
+    in-target chown dendy:dendy /home/dendy/.bashrc
