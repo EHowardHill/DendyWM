@@ -7,7 +7,8 @@ cd src
 
     echo "🏢: Launcher"
     cd dendy_launcher
-        make -j$(nproc)
+        make clean
+        make
         mv dendy_launcher ../../dendy/etc/dendy/launcher
         echo ""
     cd ..
@@ -31,5 +32,7 @@ new_version="$major.$minor.$revision.$new_buildnumber"
 sed -i "s/^Version: .*/Version: $new_version/" "$control_file"
 
 # Package the build
-sudo chmod 0775 dendy/DEBIAN/*
+chmod 755 dendy/DEBIAN
+find dendy/DEBIAN -type d -exec chmod 755 {} \;
+find dendy/DEBIAN -type f -exec chmod 644 {} \;
 dpkg-deb -b dendy ./builds

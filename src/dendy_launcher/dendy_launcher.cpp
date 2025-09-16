@@ -1,5 +1,4 @@
 // dendy_launcher.cpp
-
 #include "include/raylib.h"
 #include <iostream>
 #include <vector>
@@ -11,31 +10,272 @@
 #include <cmath>
 #include <map>
 #include <memory>
+#include <cstdlib>
+#include <cerrno>
+#include <cstring>
+#include <sys/wait.h>
 
 namespace fs = std::filesystem;
 
-// Configuration constants
-constexpr int INITIAL_WINDOW_WIDTH = 1920;
-constexpr int INITIAL_WINDOW_HEIGHT = 1080;
-constexpr int MIN_GRID_COLS = 3;
-constexpr int MAX_GRID_COLS = 5;
-constexpr int ICON_SIZE = 196;
-constexpr int ICON_PADDING = 64;
-constexpr int TOP_MARGIN = 128;
-constexpr int BOTTOM_MARGIN = 100;
-constexpr int SCROLL_PADDING = 50;
-constexpr int TEXT_HEIGHT = 32;
-constexpr int CELL_WIDTH = 300;
-constexpr int CELL_HEIGHT = 300;
-constexpr float SCROLL_SPEED = 15.0f;
-constexpr float SMOOTH_SCROLL_FACTOR = 0.15f;
-constexpr float GAMEPAD_DEADZONE = 0.25f;
-constexpr float SELECTION_SCALE = 1.1f;
-constexpr float ANIMATION_SPEED = 0.2f;
-constexpr float FADE_IN_DURATION = 0.1f;
-constexpr float TILE_STAGGER_DELAY = 0.03f;
-constexpr float TILE_ANIMATION_DURATION = 0.5f;
-constexpr float LAUNCH_ANIMATION_DURATION = 0.6f;
+// Configuration structure to hold all settings
+struct LauncherConfig
+{
+    // Window settings
+    int initial_window_width = 1920;
+    int initial_window_height = 1080;
+
+    // Grid settings
+    int min_grid_cols = 3;
+    int max_grid_cols = 5;
+    int cell_width = 300;
+    int cell_height = 300;
+
+    // Icon settings
+    int icon_size = 196;
+    int icon_padding = 64;
+
+    // Layout settings
+    int top_margin = 128;
+    int bottom_margin = 100;
+    int scroll_padding = 50;
+    int text_height = 32;
+
+    // Animation settings
+    float scroll_speed = 15.0f;
+    float smooth_scroll_factor = 0.15f;
+    float gamepad_deadzone = 0.25f;
+    float selection_scale = 1.1f;
+    float animation_speed = 0.2f;
+    float fade_in_duration = 0.1f;
+    float tile_stagger_delay = 0.03f;
+    float tile_animation_duration = 0.5f;
+    float launch_animation_duration = 0.6f;
+
+    // Asset paths
+    std::string bg_music = "assets/bg02.mp3";
+    std::string snd_move = "assets/move.wav";
+    std::string snd_select = "assets/select.wav";
+    std::string snd_login = "assets/login.wav";
+    std::string font_url = "assets/fonts/Bogart-Black-trial.ttf";
+    std::string font_url_launcher = "assets/fonts/Bogart-Medium-trial.ttf";
+    std::string logo_url = "assets/logo.png";
+
+    // Configuration file path
+    static constexpr const char *CONFIG_FILE = "config/launcher.ini";
+};
+
+// Configuration parser class
+class ConfigParser
+{
+private:
+    static std::string trim(const std::string &str)
+    {
+        size_t first = str.find_first_not_of(" \t\n\r");
+        if (first == std::string::npos)
+            return "";
+        size_t last = str.find_last_not_of(" \t\n\r");
+        return str.substr(first, (last - first + 1));
+    }
+
+    static std::pair<std::string, std::string> parseKeyValue(const std::string &line)
+    {
+        size_t pos = line.find('=');
+        if (pos == std::string::npos)
+            return {"", ""};
+
+        std::string key = trim(line.substr(0, pos));
+        std::string value = trim(line.substr(pos + 1));
+
+        // Remove quotes if present
+        if (value.length() >= 2 && value.front() == '"' && value.back() == '"')
+        {
+            value = value.substr(1, value.length() - 2);
+        }
+
+        return {key, value};
+    }
+
+public:
+    static LauncherConfig LoadConfig(const std::string &filepath)
+    {
+        LauncherConfig config;
+
+        // Try to open the config file
+        std::ifstream file(filepath);
+        if (!file.is_open())
+        {
+            std::cout << "Config file not found at: " << filepath << ". Using default values." << std::endl;
+
+            // Create a default config file
+            SaveDefaultConfig(filepath, config);
+            return config;
+        }
+
+        std::string line;
+        std::string currentSection;
+
+        while (std::getline(file, line))
+        {
+            line = trim(line);
+
+            // Skip empty lines and comments
+            if (line.empty() || line[0] == '#' || line[0] == ';')
+                continue;
+
+            // Check for section header
+            if (line[0] == '[' && line.back() == ']')
+            {
+                currentSection = line.substr(1, line.length() - 2);
+                continue;
+            }
+
+            // Parse key-value pair
+            auto [key, value] = parseKeyValue(line);
+            if (key.empty())
+                continue;
+
+            // Apply settings based on section
+            if (currentSection == "Window")
+            {
+                if (key == "initial_width")
+                    config.initial_window_width = std::stoi(value);
+                else if (key == "initial_height")
+                    config.initial_window_height = std::stoi(value);
+            }
+            else if (currentSection == "Grid")
+            {
+                if (key == "min_cols")
+                    config.min_grid_cols = std::stoi(value);
+                else if (key == "max_cols")
+                    config.max_grid_cols = std::stoi(value);
+                else if (key == "cell_width")
+                    config.cell_width = std::stoi(value);
+                else if (key == "cell_height")
+                    config.cell_height = std::stoi(value);
+            }
+            else if (currentSection == "Icons")
+            {
+                if (key == "icon_size")
+                    config.icon_size = std::stoi(value);
+                else if (key == "icon_padding")
+                    config.icon_padding = std::stoi(value);
+            }
+            else if (currentSection == "Layout")
+            {
+                if (key == "top_margin")
+                    config.top_margin = std::stoi(value);
+                else if (key == "bottom_margin")
+                    config.bottom_margin = std::stoi(value);
+                else if (key == "scroll_padding")
+                    config.scroll_padding = std::stoi(value);
+                else if (key == "text_height")
+                    config.text_height = std::stoi(value);
+            }
+            else if (currentSection == "Animation")
+            {
+                if (key == "scroll_speed")
+                    config.scroll_speed = std::stof(value);
+                else if (key == "smooth_scroll_factor")
+                    config.smooth_scroll_factor = std::stof(value);
+                else if (key == "gamepad_deadzone")
+                    config.gamepad_deadzone = std::stof(value);
+                else if (key == "selection_scale")
+                    config.selection_scale = std::stof(value);
+                else if (key == "animation_speed")
+                    config.animation_speed = std::stof(value);
+                else if (key == "fade_in_duration")
+                    config.fade_in_duration = std::stof(value);
+                else if (key == "tile_stagger_delay")
+                    config.tile_stagger_delay = std::stof(value);
+                else if (key == "tile_animation_duration")
+                    config.tile_animation_duration = std::stof(value);
+                else if (key == "launch_animation_duration")
+                    config.launch_animation_duration = std::stof(value);
+            }
+            else if (currentSection == "Assets")
+            {
+                if (key == "bg_music")
+                    config.bg_music = value;
+                else if (key == "snd_move")
+                    config.snd_move = value;
+                else if (key == "snd_select")
+                    config.snd_select = value;
+                else if (key == "snd_login")
+                    config.snd_login = value;
+                else if (key == "font_url")
+                    config.font_url = value;
+                else if (key == "font_url_launcher")
+                    config.font_url_launcher = value;
+                else if (key == "logo_url")
+                    config.logo_url = value;
+            }
+        }
+
+        file.close();
+        std::cout << "Configuration loaded from: " << filepath << std::endl;
+        return config;
+    }
+
+    static void SaveDefaultConfig(const std::string &filepath, const LauncherConfig &config)
+    {
+        // Create directory if it doesn't exist
+        fs::path path(filepath);
+        fs::create_directories(path.parent_path());
+
+        std::ofstream file(filepath);
+        if (!file.is_open())
+        {
+            std::cerr << "Failed to create default config file: " << filepath << std::endl;
+            return;
+        }
+
+        file << "# Dendy Launcher Configuration File\n";
+        file << "# Modify these values to customize the launcher appearance and behavior\n\n";
+
+        file << "[Window]\n";
+        file << "initial_width = " << config.initial_window_width << "\n";
+        file << "initial_height = " << config.initial_window_height << "\n\n";
+
+        file << "[Grid]\n";
+        file << "min_cols = " << config.min_grid_cols << "\n";
+        file << "max_cols = " << config.max_grid_cols << "\n";
+        file << "cell_width = " << config.cell_width << "\n";
+        file << "cell_height = " << config.cell_height << "\n\n";
+
+        file << "[Icons]\n";
+        file << "icon_size = " << config.icon_size << "\n";
+        file << "icon_padding = " << config.icon_padding << "\n\n";
+
+        file << "[Layout]\n";
+        file << "top_margin = " << config.top_margin << "\n";
+        file << "bottom_margin = " << config.bottom_margin << "\n";
+        file << "scroll_padding = " << config.scroll_padding << "\n";
+        file << "text_height = " << config.text_height << "\n\n";
+
+        file << "[Animation]\n";
+        file << "scroll_speed = " << config.scroll_speed << "\n";
+        file << "smooth_scroll_factor = " << config.smooth_scroll_factor << "\n";
+        file << "gamepad_deadzone = " << config.gamepad_deadzone << "\n";
+        file << "selection_scale = " << config.selection_scale << "\n";
+        file << "animation_speed = " << config.animation_speed << "\n";
+        file << "fade_in_duration = " << config.fade_in_duration << "\n";
+        file << "tile_stagger_delay = " << config.tile_stagger_delay << "\n";
+        file << "tile_animation_duration = " << config.tile_animation_duration << "\n";
+        file << "launch_animation_duration = " << config.launch_animation_duration << "\n\n";
+
+        file << "[Assets]\n";
+        file << "bg_music = \"" << config.bg_music << "\"\n";
+        file << "snd_move = \"" << config.snd_move << "\"\n";
+        file << "snd_select = \"" << config.snd_select << "\"\n";
+        file << "snd_login = \"" << config.snd_login << "\"\n";
+        file << "font_url = \"" << config.font_url << "\"\n";
+        file << "font_url_launcher = \"" << config.font_url_launcher << "\"\n";
+        file << "logo_url = \"" << config.logo_url << "\"\n";
+
+        file.close();
+        std::cout << "Default configuration file created at: " << filepath << std::endl;
+    }
+};
 
 enum AnimationState
 {
@@ -139,16 +379,16 @@ public:
         return *this;
     }
 
-    void UpdateAnimation()
+    void UpdateAnimation(float animationSpeed)
     {
-        scale += (targetScale - scale) * ANIMATION_SPEED;
+        scale += (targetScale - scale) * animationSpeed;
     }
 
-    void UpdateFadeInAnimation(float deltaTime)
+    void UpdateFadeInAnimation(float deltaTime, float tileAnimationDuration)
     {
         if (animProgress < 1.0f)
         {
-            animProgress = std::min(1.0f, animProgress + deltaTime / TILE_ANIMATION_DURATION);
+            animProgress = std::min(1.0f, animProgress + deltaTime / tileAnimationDuration);
 
             // Easing function for smooth animation
             float easedProgress = 1.0f - pow(1.0f - animProgress, 3.0f);
@@ -164,7 +404,7 @@ public:
         }
     }
 
-    void UpdateLaunchAnimation(float progress, int index, int totalApps, Vector2 centerPoint)
+    void UpdateLaunchAnimation(float progress, int index, Vector2 centerPoint)
     {
         // Calculate direction from center
         Vector2 direction = {
@@ -437,7 +677,7 @@ public:
     }
 
     // Returns true if icon was loaded successfully, false otherwise
-    static bool TryLoadIconTexture(const std::string &iconPath, Texture2D &tex)
+    static bool TryLoadIconTexture(const std::string &iconPath, Texture2D &tex, int iconSize)
     {
         if (iconPath.empty())
         {
@@ -456,18 +696,18 @@ public:
             if (img.data)
             {
                 // Resize to standard icon size while maintaining aspect ratio
-                float scale = std::min((float)ICON_SIZE / img.width, (float)ICON_SIZE / img.height);
+                float scale = std::min((float)iconSize / img.width, (float)iconSize / img.height);
                 int newWidth = img.width * scale;
                 int newHeight = img.height * scale;
 
                 ImageResize(&img, newWidth, newHeight);
 
                 // Create a new image with padding if needed
-                if (newWidth < ICON_SIZE || newHeight < ICON_SIZE)
+                if (newWidth < iconSize || newHeight < iconSize)
                 {
-                    Image paddedImg = GenImageColor(ICON_SIZE, ICON_SIZE, BLANK);
-                    int offsetX = (ICON_SIZE - newWidth) / 2;
-                    int offsetY = (ICON_SIZE - newHeight) / 2;
+                    Image paddedImg = GenImageColor(iconSize, iconSize, BLANK);
+                    int offsetX = (iconSize - newWidth) / 2;
+                    int offsetY = (iconSize - newHeight) / 2;
                     ImageDraw(&paddedImg, img,
                               (Rectangle){0, 0, (float)newWidth, (float)newHeight},
                               (Rectangle){(float)offsetX, (float)offsetY, (float)newWidth, (float)newHeight},
@@ -495,6 +735,7 @@ public:
 class AppLauncher
 {
 private:
+    LauncherConfig config;
     std::vector<std::unique_ptr<AppEntry>> apps;
     int selectedIndex;
     int hoveredIndex;
@@ -506,10 +747,10 @@ private:
     int lastWindowWidth;
     int lastWindowHeight;
     bool wasFocusedLastFrame = true;
-    Music music = LoadMusicStream("/etc/dendy/assets/bg01.mp3");
-    Sound fxMove = LoadSound("/etc/dendy/assets/move.wav");
-    Sound fxSelect = LoadSound("/etc/dendy/assets/select.wav");
-    Font fontBold = LoadFontEx("/etc/dendy/assets/fonts/Bogart-Black-trial.ttf", 96, 0, 250);
+    Music music;
+    Sound fxMove;
+    Sound fxSelect;
+    Font fontBold;
     Texture2D logoTexture;
 
     // Animation state
@@ -557,7 +798,7 @@ private:
         // Use erase-remove idiom to filter out apps without valid icons
         apps.erase(
             std::remove_if(apps.begin(), apps.end(),
-                           [](std::unique_ptr<AppEntry> &app)
+                           [this](std::unique_ptr<AppEntry> &app)
                            {
                                std::string iconPath = IconLoader::FindIcon(app->icon);
 
@@ -568,7 +809,7 @@ private:
                                }
 
                                // Try to load the texture
-                               bool success = IconLoader::TryLoadIconTexture(iconPath, app->texture);
+                               bool success = IconLoader::TryLoadIconTexture(iconPath, app->texture, config.icon_size);
                                if (success)
                                {
                                    app->hasTexture = true;
@@ -591,7 +832,7 @@ private:
         // Set up staggered animation delays for Windows Phone effect
         for (int i = 0; i < (int)apps.size(); i++)
         {
-            apps[i]->animDelay = i * TILE_STAGGER_DELAY;
+            apps[i]->animDelay = i * config.tile_stagger_delay;
             apps[i]->animProgress = 0.0f;
             apps[i]->opacity = 0.0f;
         }
@@ -599,15 +840,15 @@ private:
 
     int CalculateGridColumns(int windowWidth) const
     {
-        int cols = windowWidth / CELL_WIDTH;
-        return std::clamp(cols, MIN_GRID_COLS, MAX_GRID_COLS);
+        int cols = windowWidth / config.cell_width;
+        return std::clamp(cols, config.min_grid_cols, config.max_grid_cols);
     }
 
     void UpdateMaxScroll()
     {
         int windowHeight = GetScreenHeight();
         int rows = ((int)apps.size() + currentGridCols - 1) / currentGridCols;
-        float contentHeight = rows * CELL_HEIGHT + TOP_MARGIN + BOTTOM_MARGIN;
+        float contentHeight = rows * config.cell_height + config.top_margin + config.bottom_margin;
         maxScrollY = std::max(0.0f, contentHeight - windowHeight);
     }
 
@@ -617,11 +858,11 @@ private:
         int row = index / currentGridCols;
         int col = index % currentGridCols;
 
-        float gridWidth = currentGridCols * CELL_WIDTH;
-        float x = (windowWidth - gridWidth) / 2 + col * CELL_WIDTH;
-        float y = row * CELL_HEIGHT - scrollY + TOP_MARGIN; // Use TOP_MARGIN constant
+        float gridWidth = currentGridCols * config.cell_width;
+        float x = (windowWidth - gridWidth) / 2 + col * config.cell_width;
+        float y = row * config.cell_height - scrollY + config.top_margin;
 
-        return {x, y, (float)CELL_WIDTH, (float)CELL_HEIGHT};
+        return {x, y, (float)config.cell_width, (float)config.cell_height};
     }
 
     void LaunchApp(int index)
@@ -684,24 +925,41 @@ private:
 
 public:
     AppLauncher() : selectedIndex(0), hoveredIndex(-1), scrollY(0), targetScrollY(0), maxScrollY(0),
-                    currentGridCols(CalculateGridColumns(INITIAL_WINDOW_WIDTH)),
-                    lastWindowWidth(INITIAL_WINDOW_WIDTH), lastWindowHeight(INITIAL_WINDOW_HEIGHT),
                     animState(ANIM_FADE_IN), animTimer(0.0f), fadeAlpha(1.0f),
                     launchingAppIndex(-1)
     {
-        font = LoadFontEx("/etc/dendy/assets/fonts/Bogart-Medium-trial.ttf", 32, nullptr, 0);
+        // Load configuration
+        config = ConfigParser::LoadConfig(LauncherConfig::CONFIG_FILE);
+
+        currentGridCols = CalculateGridColumns(config.initial_window_width);
+        lastWindowWidth = config.initial_window_width;
+        lastWindowHeight = config.initial_window_height;
+
+        // Load fonts
+        font = LoadFontEx(config.font_url_launcher.c_str(), 32, nullptr, 0);
         if (!font.texture.id)
         {
             font = GetFontDefault();
         }
 
+        fontBold = LoadFontEx(config.font_url.c_str(), 96, 0, 250);
+        if (!fontBold.texture.id)
+        {
+            fontBold = GetFontDefault();
+        }
+
         // Load logo
-        Image logoImage = LoadImage("/etc/dendy/assets/logo.png");
+        Image logoImage = LoadImage(config.logo_url.c_str());
         if (logoImage.data)
         {
             logoTexture = LoadTextureFromImage(logoImage);
             UnloadImage(logoImage);
         }
+
+        // Load sounds
+        music = LoadMusicStream(config.bg_music.c_str());
+        fxMove = LoadSound(config.snd_move.c_str());
+        fxSelect = LoadSound(config.snd_select.c_str());
 
         // Start music
         PlayMusicStream(music);
@@ -709,10 +967,18 @@ public:
 
     ~AppLauncher()
     {
-        if (font.texture.id != GetFontDefault().texture.id)
-        {
+        if (font.texture.id)
             UnloadFont(font);
-        }
+        if (fontBold.texture.id)
+            UnloadFont(fontBold);
+        if (logoTexture.id)
+            UnloadTexture(logoTexture);
+        if (music.ctxData)
+            UnloadMusicStream(music);
+        if (fxMove.frameCount)
+            UnloadSound(fxMove);
+        if (fxSelect.frameCount)
+            UnloadSound(fxSelect);
     }
 
     void LoadApplications()
@@ -811,22 +1077,22 @@ public:
 
             if (gamepadCooldown <= 0)
             {
-                if (axisX > GAMEPAD_DEADZONE && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1)
+                if (axisX > config.gamepad_deadzone && selectedIndex % cols < cols - 1 && selectedIndex < (int)apps.size() - 1)
                 {
                     selectedIndex++;
                     gamepadCooldown = 0.2f;
                 }
-                if (axisX < -GAMEPAD_DEADZONE && selectedIndex % cols > 0)
+                if (axisX < -config.gamepad_deadzone && selectedIndex % cols > 0)
                 {
                     selectedIndex--;
                     gamepadCooldown = 0.2f;
                 }
-                if (axisY > GAMEPAD_DEADZONE && selectedIndex + cols < (int)apps.size())
+                if (axisY > config.gamepad_deadzone && selectedIndex + cols < (int)apps.size())
                 {
                     selectedIndex += cols;
                     gamepadCooldown = 0.2f;
                 }
-                if (axisY < -GAMEPAD_DEADZONE && selectedIndex - cols >= 0)
+                if (axisY < -config.gamepad_deadzone && selectedIndex - cols >= 0)
                 {
                     selectedIndex -= cols;
                     gamepadCooldown = 0.2f;
@@ -843,39 +1109,39 @@ public:
         float wheel = GetMouseWheelMove();
         if (wheel != 0)
         {
-            targetScrollY -= wheel * SCROLL_SPEED * 5;
+            targetScrollY -= wheel * config.scroll_speed * 5;
         }
 
         // Ensure selected item is visible
         Rectangle selectedRect = GetCellRect(selectedIndex);
         int windowHeight = GetScreenHeight();
-        if (selectedRect.y < SCROLL_PADDING)
+        if (selectedRect.y < config.scroll_padding)
         {
-            targetScrollY -= (SCROLL_PADDING - selectedRect.y);
+            targetScrollY -= (config.scroll_padding - selectedRect.y);
         }
-        else if (selectedRect.y + CELL_HEIGHT > windowHeight - SCROLL_PADDING)
+        else if (selectedRect.y + config.cell_height > windowHeight - config.scroll_padding)
         {
-            targetScrollY += (selectedRect.y + CELL_HEIGHT - windowHeight + SCROLL_PADDING);
+            targetScrollY += (selectedRect.y + config.cell_height - windowHeight + config.scroll_padding);
         }
 
         // Clamp scroll
         targetScrollY = std::clamp(targetScrollY, 0.0f, maxScrollY);
 
         // Smooth scroll
-        scrollY += (targetScrollY - scrollY) * SMOOTH_SCROLL_FACTOR;
+        scrollY += (targetScrollY - scrollY) * config.smooth_scroll_factor;
 
         // Update animations
         for (int i = 0; i < (int)apps.size(); i++)
         {
             if (i == selectedIndex || i == hoveredIndex)
             {
-                apps[i]->targetScale = SELECTION_SCALE;
+                apps[i]->targetScale = config.selection_scale;
             }
             else
             {
                 apps[i]->targetScale = 1.0f;
             }
-            apps[i]->UpdateAnimation();
+            apps[i]->UpdateAnimation(config.animation_speed);
         }
     }
 
@@ -888,7 +1154,7 @@ public:
         {
         case ANIM_FADE_IN:
             // Update fade alpha
-            fadeAlpha = 1.0f - (animTimer / FADE_IN_DURATION);
+            fadeAlpha = 1.0f - (animTimer / config.fade_in_duration);
             if (fadeAlpha < 0)
                 fadeAlpha = 0;
 
@@ -897,12 +1163,12 @@ public:
             {
                 if (animTimer > app->animDelay)
                 {
-                    app->UpdateFadeInAnimation(deltaTime);
+                    app->UpdateFadeInAnimation(deltaTime, config.tile_animation_duration);
                 }
             }
 
             // Check if fade in is complete
-            if (animTimer > FADE_IN_DURATION + apps.size() * TILE_STAGGER_DELAY + TILE_ANIMATION_DURATION)
+            if (animTimer > config.fade_in_duration + apps.size() * config.tile_stagger_delay + config.tile_animation_duration)
             {
                 animState = ANIM_NORMAL;
                 fadeAlpha = 0;
@@ -911,7 +1177,7 @@ public:
 
         case ANIM_LAUNCHING:
         {
-            float progress = animTimer / LAUNCH_ANIMATION_DURATION;
+            float progress = animTimer / config.launch_animation_duration;
             if (progress > 1.0f)
                 progress = 1.0f;
 
@@ -924,7 +1190,7 @@ public:
             // Update each app's launch animation
             for (int i = 0; i < (int)apps.size(); i++)
             {
-                apps[i]->UpdateLaunchAnimation(progress, i, apps.size(), centerPoint);
+                apps[i]->UpdateLaunchAnimation(progress, i, centerPoint);
             }
 
             // Fade to black
@@ -933,7 +1199,23 @@ public:
             // Launch the app when animation is complete
             if (progress >= 1.0f && !pendingLaunchCommand.empty())
             {
-                system(pendingLaunchCommand.c_str());
+                int rc = system(pendingLaunchCommand.c_str());
+                if (rc == -1)
+                {
+                    std::cerr << "system() failed: " << std::strerror(errno) << "\n";
+                }
+                else if (WIFEXITED(rc))
+                {
+                    int code = WEXITSTATUS(rc);
+                    if (code != 0)
+                    {
+                        std::cerr << "Launcher shell exited with code " << code << "\n";
+                    }
+                }
+                else if (WIFSIGNALED(rc))
+                {
+                    std::cerr << "Launcher shell killed by signal " << WTERMSIG(rc) << "\n";
+                }
                 pendingLaunchCommand.clear();
             }
 
@@ -993,7 +1275,7 @@ public:
                 Rectangle cellRect = GetCellRect(i);
 
                 // Skip if outside visible area (only in normal state)
-                if (animState == ANIM_NORMAL && (cellRect.y + CELL_HEIGHT < 0 || cellRect.y > windowHeight))
+                if (animState == ANIM_NORMAL && (cellRect.y + config.cell_height < 0 || cellRect.y > windowHeight))
                     continue;
 
                 float scale = apps[i]->scale;
@@ -1025,8 +1307,8 @@ public:
 
                 // Draw icon with scaling
                 float iconX = drawX + cellRect.width / 2;
-                float iconY = drawY + CELL_HEIGHT / 2 - 20;
-                float scaledSize = ICON_SIZE * scale;
+                float iconY = drawY + config.cell_height / 2 - 20;
+                float scaledSize = config.icon_size * scale;
 
                 if (apps[i]->hasTexture)
                 {
@@ -1045,7 +1327,7 @@ public:
 
                 // Draw text shadow
                 Color shadowColor = {50, 50, 50, (unsigned char)(32 * opacity)}; // Darker shadow
-                Color textColor = {0, 0, 0, (unsigned char)(255 * opacity)};      // Black text
+                Color textColor = {0, 0, 0, (unsigned char)(255 * opacity)};     // Black text
                 DrawTextEx(font, apps[i]->name.c_str(), {textX + 1, textY + 1}, 32, 1, shadowColor);
                 DrawTextEx(font, apps[i]->name.c_str(), {textX, textY}, 32, 1, textColor);
             }
@@ -1054,26 +1336,20 @@ public:
         // Draw UI elements only when not launching an app
         if (animState != ANIM_LAUNCHING)
         {
-            DrawRectangleGradientV(0, 0, windowWidth, SCROLL_PADDING,
+            DrawRectangleGradientV(0, 0, windowWidth, config.scroll_padding,
                                    Color{220, 220, 220, 255}, Color{220, 220, 220, 0});
 
             // Draw bottom gradient fade
-            DrawRectangleGradientV(0, windowHeight - SCROLL_PADDING, windowWidth, SCROLL_PADDING,
+            DrawRectangleGradientV(0, windowHeight - config.scroll_padding, windowWidth, config.scroll_padding,
                                    Color{220, 220, 220, 0}, Color{220, 220, 220, 255});
 
             // Draw title
-            float logoX = (windowWidth - logoTexture.width) / 2.0f;
-            float logoY = 12;
-
-            DrawTexture(logoTexture, logoX, logoY, WHITE);
-
-            // Draw grid info in corner (uncomment if desired)
-            /*
-            char info[64];
-            snprintf(info, sizeof(info), "Grid: %dx%d", currentGridCols,
-                    ((int)apps.size() + currentGridCols - 1) / currentGridCols);
-            DrawTextEx(font, info, {windowWidth - 150, 20}, 14, 1, Color{50, 50, 50, 150}); // Darker gray
-            */
+            if (logoTexture.id)
+            {
+                float logoX = (windowWidth - logoTexture.width) / 2.0f;
+                float logoY = 12;
+                DrawTexture(logoTexture, logoX, logoY, WHITE);
+            }
 
             // Draw scroll indicator if needed
             if (maxScrollY > 0 && !apps.empty())
@@ -1083,8 +1359,8 @@ public:
                 float indicatorHeight = 40;
                 float indicatorY = 100 + scrollPercent * (barHeight - indicatorHeight);
 
-                DrawRectangle(windowWidth - 10, 100, 4, barHeight, Color{150, 150, 150, 100});           // Darker scroll bar
-                DrawRectangle(windowWidth - 10, indicatorY, 4, indicatorHeight, Color{50, 50, 50, 200}); // Darker indicator
+                DrawRectangle(windowWidth - 10, 100, 4, barHeight, Color{150, 150, 150, 100});
+                DrawRectangle(windowWidth - 10, indicatorY, 4, indicatorHeight, Color{50, 50, 50, 200});
             }
         }
 
@@ -1114,25 +1390,35 @@ public:
             Draw();
         }
     }
+
+    Sound GetLoginSound() { return LoadSound(config.snd_login.c_str()); }
+    const LauncherConfig &GetConfig() const { return config; }
 };
 
 int main()
 {
-    // Initialize window
+    // Load configuration first
+    LauncherConfig config = ConfigParser::LoadConfig(LauncherConfig::CONFIG_FILE);
+
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
-    InitWindow(INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT, "Dendy Launcher");
+    InitWindow(config.initial_window_width, config.initial_window_height, "Dendy Launcher");
     InitAudioDevice();
     SetTargetFPS(60);
 
-    Sound fxLogin = LoadSound("/etc/dendy/assets/login.wav");
-    PlaySound(fxLogin);
+    {
+        // Everything that owns GPU/audio resources lives inside this scope
+        Sound fxLogin = LoadSound(config.snd_login.c_str());
+        PlaySound(fxLogin);
 
-    // Create and run launcher
-    AppLauncher launcher;
-    launcher.Run();
+        AppLauncher launcher;
+        launcher.Run();
 
-    // Cleanup
+        UnloadSound(fxLogin); // unload while audio device is still open
+        // AppLauncher destructor runs here (textures/fonts/music/sounds unloaded)
+    }
+
+    // Now it's safe to close devices/contexts
+    CloseAudioDevice();
     CloseWindow();
-
     return 0;
 }
